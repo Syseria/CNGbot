@@ -117,6 +117,13 @@ func isValidCandidate(text string, c matchCandidate) bool {
 		}
 	}
 
+	// Do not match inside a markdown link URL ](...)
+	if lastOpenParen := strings.LastIndex(text[:c.start], "]("); lastOpenParen != -1 {
+		if lastCloseParen := strings.LastIndexByte(text[:c.start], ')'); lastOpenParen > lastCloseParen {
+			return false
+		}
+	}
+
 	// Do not match if preceded by letter, digit, colon, or slash
 	if c.start > 0 {
 		prev := text[c.start-1]

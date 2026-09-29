@@ -38,37 +38,57 @@ type EsiMailBody struct {
 }
 
 var (
-	reBr       = regexp.MustCompile(`(?i)<br\s*/?>`)
-	reTags     = regexp.MustCompile(`<[^>]*>`)
-	reOpeningA = regexp.MustCompile(`(?is)^<a(?:\s+[^>]*)?>$`)
-	reClosingA = regexp.MustCompile(`(?is)^</a\s*>$`)
-	reHttpHref = regexp.MustCompile(`(?i)(?:^<a|\s)href\s*=\s*["']?\s*https?://`)
+	reBr          = regexp.MustCompile(`(?i)<br\s*/?>`)
+	reTags        = regexp.MustCompile(`(?i)</?[a-z][^>]*>`)
+	reOpeningA    = regexp.MustCompile(`(?is)^<a(?:\s+[^>]*)?>$`)
+	reClosingA    = regexp.MustCompile(`(?is)^</a\s*>$`)
+	reHref        = regexp.MustCompile(`(?i)\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
+	reHttpScheme  = regexp.MustCompile(`(?i)^https?://`)
+	reEmptyMDLink = regexp.MustCompile(`\[\s*\]\((https?://[^\s)]+)\)`)
 )
 
 func CleanEveMailBody(rawBody string) string {
 	text := reBr.ReplaceAllString(rawBody, "\n")
-	var aStack []bool
+	var aStack []string
 	text = reTags.ReplaceAllStringFunc(text, func(tag string) string {
 		if reOpeningA.MatchString(tag) {
-			if reHttpHref.MatchString(tag) {
-				aStack = append(aStack, true)
-				return tag
+			m := reHref.FindStringSubmatch(tag)
+			var href string
+			if len(m) > 0 {
+				for i := 1; i < len(m); i++ {
+					if m[i] != "" {
+						href = strings.TrimSpace(m[i])
+						break
+					}
+				}
 			}
-			aStack = append(aStack, false)
+			if reHttpScheme.MatchString(href) {
+				aStack = append(aStack, href)
+				return "["
+			}
+			aStack = append(aStack, "")
 			return ""
 		}
 		if reClosingA.MatchString(tag) {
 			if len(aStack) > 0 {
-				keep := aStack[len(aStack)-1]
+				href := aStack[len(aStack)-1]
 				aStack = aStack[:len(aStack)-1]
-				if keep {
-					return tag
+				if href != "" {
+					return fmt.Sprintf("](%s)", href)
 				}
 			}
 			return ""
 		}
 		return ""
 	})
+	for len(aStack) > 0 {
+		href := aStack[len(aStack)-1]
+		aStack = aStack[:len(aStack)-1]
+		if href != "" {
+			text += fmt.Sprintf("](%s)", href)
+		}
+	}
+	text = reEmptyMDLink.ReplaceAllString(text, "[$1]($1)")
 	text = html.UnescapeString(text)
 	return strings.TrimSpace(text)
 }

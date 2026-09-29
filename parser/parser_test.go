@@ -55,6 +55,8 @@ func TestInjectDiscordTimestamps(t *testing.T) {
 		{"Already formatted timestamp", "21:00 Eve Time (<t:1788814800:F>)", "21:00 Eve Time (<t:1788814800:F>)"},
 		{"Time inside HTML href tag not matched", `<a href="https://example.com/op?time=20:00">Link</a>`, `<a href="https://example.com/op?time=20:00">Link</a>`},
 		{"Time inside anchor text matched", `<a href="https://example.com">Fleet at 20:00 eve time</a>`, `<a href="https://example.com">Fleet at 20:00 eve time (<t:1788897600:F>)</a>`},
+		{"Time inside markdown link URL not matched", `[Link](https://example.com/op?time=20:00)`, `[Link](https://example.com/op?time=20:00)`},
+		{"Time inside markdown link text matched", `[Fleet at 20:00 eve time](https://example.com)`, `[Fleet at 20:00 eve time (<t:1788897600:F>)](https://example.com)`},
 
 		// Negative matches (should not change)
 		{"Bare duration 7 days", "7 days", "7 days"},

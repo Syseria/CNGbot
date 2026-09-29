@@ -20,14 +20,14 @@ func TestCleanEveMailBody(t *testing.T) {
 			expected: "Hello\n\nThis is a test message & greetings.",
 		},
 		{
-			name:     "preserve https link",
+			name:     "preserve https link as markdown",
 			raw:      `<font size="12">Join our Discord: <a href="https://discord.gg/abc">https://discord.gg/abc</a></font>`,
-			expected: `Join our Discord: <a href="https://discord.gg/abc">https://discord.gg/abc</a>`,
+			expected: `Join our Discord: [https://discord.gg/abc](https://discord.gg/abc)`,
 		},
 		{
-			name:     "preserve http link",
+			name:     "preserve http link as markdown",
 			raw:      `Visit <a href="http://eve-gate.net">our site</a> for details.`,
-			expected: `Visit <a href="http://eve-gate.net">our site</a> for details.`,
+			expected: `Visit [our site](http://eve-gate.net) for details.`,
 		},
 		{
 			name:     "strip non-http/https eve links like showinfo and fitting",
@@ -37,22 +37,22 @@ func TestCleanEveMailBody(t *testing.T) {
 		{
 			name:     "mixed http and non-http links",
 			raw:      `Check <a href="showinfo:1373//10000002">Jita</a> and <a href="https://zkillboard.com">Zkill</a> and <a href="http://example.com">Example</a>.`,
-			expected: `Check Jita and <a href="https://zkillboard.com">Zkill</a> and <a href="http://example.com">Example</a>.`,
+			expected: `Check Jita and [Zkill](https://zkillboard.com) and [Example](http://example.com).`,
 		},
 		{
 			name:     "nested formatting inside allowed link stripped",
 			raw:      `<a href="https://example.com"><b>Bold Link</b></a>`,
-			expected: `<a href="https://example.com">Bold Link</a>`,
+			expected: `[Bold Link](https://example.com)`,
 		},
 		{
 			name:     "case insensitivity of scheme and tags",
 			raw:      `<a href="HTTPS://EXAMPLE.COM">Capital Scheme</a> and <A HREF="HTTP://EXAMPLE.COM">Capital Tag</A>`,
-			expected: `<a href="HTTPS://EXAMPLE.COM">Capital Scheme</a> and <A HREF="HTTP://EXAMPLE.COM">Capital Tag</A>`,
+			expected: `[Capital Scheme](HTTPS://EXAMPLE.COM) and [Capital Tag](HTTP://EXAMPLE.COM)`,
 		},
 		{
-			name:     "extra attributes in a tag preserved",
+			name:     "extra attributes in a tag handled",
 			raw:      `<a target="_blank" href="https://example.com" class="external">Link</a>`,
-			expected: `<a target="_blank" href="https://example.com" class="external">Link</a>`,
+			expected: `[Link](https://example.com)`,
 		},
 		{
 			name:     "other schemes stripped",
@@ -63,6 +63,11 @@ func TestCleanEveMailBody(t *testing.T) {
 			name:     "anchor without href or empty href stripped",
 			raw:      `Anchor <a name="top">Top</a> and <a href="">Empty</a>.`,
 			expected: `Anchor Top and Empty.`,
+		},
+		{
+			name: "eve mail with html anchors converted to markdown links",
+			raw: `Hi Peeps<br><br>1. SEAT / Discord<br><br>SEAT is linked to Discord, without logging into SEAT you CANNOT use voice comms. It is that simple, so when you join, log into this link > <a href="http://esi.cultofmagik.org/">Click here</a> < and sign in, that's all you have to do, when you login to Discord, change your name to the char you have in corporation or the bot will not assign roles to you. So get it done. <br><br>2. Wanderer<br><br>We are not longer posting the system in MagikMain MOTD for the C2 entrance, if you are in the Wormhole you should be logged into Wanderer, you can find the link here > <a href="http://wh.cultofmagik.org/home">Click Here</a> < In Wanderer you will be able to see the current C2 entrance and connecting holes. <br><br>3. Allies Discord <br><br>We will be working closely with  Prometheus Rising. Moving forwards, it is run by a close friend of mine, so to this end, we will be joining their Discord for join ops, please join their Discord ASAP, you can find the link here > <a href="http://discord.gg/F5dYbNuue">Discord Link</a> < - Please join <br><br>4. Wormhole Ships<br><br>If you are looking to live in the wormhole, you need have a Kikimora or armor destroyer, a Drake and or DNI/Nighthawk or a shield fitted battlecruiser for system defence, you can find these fits in the alliance bulletins<br><br>That's all for now, thanks for being awesome and keeping this corp respectful and casual<br><br>Regards<br><br>Demon`,
+			expected: "Hi Peeps\n\n1. SEAT / Discord\n\nSEAT is linked to Discord, without logging into SEAT you CANNOT use voice comms. It is that simple, so when you join, log into this link > [Click here](http://esi.cultofmagik.org/) < and sign in, that's all you have to do, when you login to Discord, change your name to the char you have in corporation or the bot will not assign roles to you. So get it done. \n\n2. Wanderer\n\nWe are not longer posting the system in MagikMain MOTD for the C2 entrance, if you are in the Wormhole you should be logged into Wanderer, you can find the link here > [Click Here](http://wh.cultofmagik.org/home) < In Wanderer you will be able to see the current C2 entrance and connecting holes. \n\n3. Allies Discord \n\nWe will be working closely with  Prometheus Rising. Moving forwards, it is run by a close friend of mine, so to this end, we will be joining their Discord for join ops, please join their Discord ASAP, you can find the link here > [Discord Link](http://discord.gg/F5dYbNuue) < - Please join \n\n4. Wormhole Ships\n\nIf you are looking to live in the wormhole, you need have a Kikimora or armor destroyer, a Drake and or DNI/Nighthawk or a shield fitted battlecruiser for system defence, you can find these fits in the alliance bulletins\n\nThat's all for now, thanks for being awesome and keeping this corp respectful and casual\n\nRegards\n\nDemon",
 		},
 	}
 
