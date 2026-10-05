@@ -1778,8 +1778,8 @@ func InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			"`/donations_leaderboard` - Displays the top 50 donors of all time to the tracked corporations.\n" +
 			"`/post_donations_leaderboard` - Posts the leaderboard to the configured donations channel.\n" +
 			"`/import_donations [data] [file] [role]` - Import pasted corporation wallet journal data to backfill donation history.\n" +
-			"`/id <target>` - Output the Discord ID and mention format for a user, channel, role, or emoji.\n\n" +
-			"`/courier_fee [volume] [jumps] [estimated price]` - Calculates the fee for a courier contract." +
+			"`/id <target>` - Output the Discord ID and mention format for a user, channel, role, or emoji.\n" +
+			"`/courier_fee [volume] [jumps] [estimated price]` - Calculates the fee for a courier contract.\n\n" +
 			"__Debug__\n" +
 			"`/toggle_logs` - Toggle posting role addition/removal logs to the designated channel.\n" +
 			"`/set_log_channel <channel>` - Set the channel where logs should be posted."
@@ -2640,19 +2640,19 @@ func InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		var estimate float64 = 0.0
 
 		if opt := getOption(data.Options, "volume"); opt != nil && opt.FloatValue() > 0.0 {
-				volume = opt.FloatValue()
+			volume = opt.FloatValue()
 		} else {
-				sendResponse(s, i.Interaction, fmt.Sprintf("The volume must be provided and greater than 0.0"))
+			sendResponse(s, i.Interaction, fmt.Sprintf("The volume must be provided and greater than 0.0"))
 		}
 		if opt := getOption(data.Options, "jumps"); opt != nil && opt.IntValue() > 0 {
-				jumps = opt.IntValue()
+			jumps = opt.IntValue()
 		} else {
-				sendResponse(s, i.Interaction, fmt.Sprintf("The jump counts must be provided and greater than 0"))
+			sendResponse(s, i.Interaction, fmt.Sprintf("The jump counts must be provided and greater than 0"))
 		}
 		if opt := getOption(data.Options, "estimate"); opt != nil && opt.FloatValue() > 0.0 {
-				estimate = opt.FloatValue()
+			estimate = opt.FloatValue()
 		} else {
-				sendResponse(s, i.Interaction, fmt.Sprintf("The estimate must be provided and greater than 0.0"))
+			sendResponse(s, i.Interaction, fmt.Sprintf("The estimate must be provided and greater than 0.0"))
 		}
 
 		var usingEstimate float64 = estimate * (baseFee + jumpFee * float64(jumps))
@@ -2665,10 +2665,10 @@ func InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 		var result []byte
 		for i := 0; i < len(intPart); i++ {
-				if i > 0 && (len(intPart)-i)%3 == 0 {
-						result = append(result, '\'')
-				}
-				result = append(result, intPart[i])
+			if i > 0 && (len(intPart)-i)%3 == 0 {
+				result = append(result, '\'')
+			}
+			result = append(result, intPart[i])
 		}
 
 		formattedISK := string(result) + "." + parts[1]
