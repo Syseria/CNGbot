@@ -2636,17 +2636,23 @@ func InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		const jumpFee float64 = 0.001
 		
 		var volume float64 = 0.0
-		var jumps int64 = 1
+		var jumps int64 = 0
 		var estimate float64 = 0.0
 		
-		if opt := getOption(data.Options, "volume"); opt != nil {
+		if opt := getOption(data.Options, "volume"); opt != nil && opt.FloatValue() > 0.0 {
 			volume = opt.FloatValue()
+		} else {
+			sendResponse(s, i.Interaction, fmt.Sprintf("The volume must be provided and greater than 0.0. Volume given: %.2f", opt.FloatValue()))
 		}
-		if opt := getOption(data.Options, "jumps"); opt != nil {
+		if opt := getOption(data.Options, "jumps"); opt != nil && opt.IntValue() > 0 {
 			jumps = opt.IntValue()
+		} else {
+			sendResponse(s, i.Interaction, fmt.Sprintf("The jump counts must be provided and greater than 0. Jumps count given: %d", opt.IntValue()))
 		}
-		if opt := getOption(data.Options, "estimate"); opt != nil {
+		if opt := getOption(data.Options, "estimate"); opt != nil && opt.FloatValue() > 0.0 {
 			estimate = opt.FloatValue()
+		} else {
+			sendResponse(s, i.Interaction, fmt.Sprintf("The estimate must be provided and greater than 0.0. Estimate given: %.2f", opt.FloatValue()))
 		}
 
 		var usingEstimate float64 = estimate * (baseFee + jumpFee * float64(jumps))
