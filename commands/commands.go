@@ -2633,47 +2633,47 @@ func InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 	case "courier_fee":
 		const baseFee float64 = 0.05
-                const jumpFee float64 = 0.001
+		const jumpFee float64 = 0.001
 
-                var volume float64 = 0.0
-                var jumps int64 = 0
-                var estimate float64 = 0.0
+		var volume float64 = 0.0
+		var jumps int64 = 0
+		var estimate float64 = 0.0
 
-                if opt := getOption(data.Options, "volume"); opt != nil && opt.FloatValue() > 0.0 {
-                        volume = opt.FloatValue()
-                } else {
-                        sendResponse(s, i.Interaction, fmt.Sprintf("The volume must be provided and greater than 0.0"))
-                }
-                if opt := getOption(data.Options, "jumps"); opt != nil && opt.IntValue() > 0 {
-                        jumps = opt.IntValue()
-                } else {
-                        sendResponse(s, i.Interaction, fmt.Sprintf("The jump counts must be provided and greater than 0"))
-                }
-                if opt := getOption(data.Options, "estimate"); opt != nil && opt.FloatValue() > 0.0 {
-                        estimate = opt.FloatValue()
-                } else {
-                        sendResponse(s, i.Interaction, fmt.Sprintf("The estimate must be provided and greater than 0.0"))
-                }
+		if opt := getOption(data.Options, "volume"); opt != nil && opt.FloatValue() > 0.0 {
+				volume = opt.FloatValue()
+		} else {
+				sendResponse(s, i.Interaction, fmt.Sprintf("The volume must be provided and greater than 0.0"))
+		}
+		if opt := getOption(data.Options, "jumps"); opt != nil && opt.IntValue() > 0 {
+				jumps = opt.IntValue()
+		} else {
+				sendResponse(s, i.Interaction, fmt.Sprintf("The jump counts must be provided and greater than 0"))
+		}
+		if opt := getOption(data.Options, "estimate"); opt != nil && opt.FloatValue() > 0.0 {
+				estimate = opt.FloatValue()
+		} else {
+				sendResponse(s, i.Interaction, fmt.Sprintf("The estimate must be provided and greater than 0.0"))
+		}
 
-                var usingEstimate float64 = estimate * (baseFee + jumpFee * float64(jumps))
-                var usingVolume float64 = (volume / 100) + baseFee + jumpFee * float64(jumps)
+		var usingEstimate float64 = estimate * (baseFee + jumpFee * float64(jumps))
+		var usingVolume float64 = (volume / 100) + baseFee + jumpFee * float64(jumps)
 
-                finalFee := max(usingEstimate, usingVolume)
+		finalFee := max(usingEstimate, usingVolume)
 
-                parts := strings.Split(fmt.Sprintf("%.2f", finalFee), ".")
-                intPart := parts[0]
+		parts := strings.Split(fmt.Sprintf("%.2f", finalFee), ".")
+		intPart := parts[0]
 
-                var result []byte
-                for i := 0; i < len(intPart); i++ {
-                        if i > 0 && (len(intPart)-i)%3 == 0 {
-                                result = append(result, '\'')
-                        }
-                        result = append(result, intPart[i])
-                }
+		var result []byte
+		for i := 0; i < len(intPart); i++ {
+				if i > 0 && (len(intPart)-i)%3 == 0 {
+						result = append(result, '\'')
+				}
+				result = append(result, intPart[i])
+		}
 
-                formattedISK := string(result) + "." + parts[1]
+		formattedISK := string(result) + "." + parts[1]
 
-                sendResponse(s, i.Interaction, fmt.Sprintf("The calculated fee is %s ISK", formattedISK))
+		sendResponse(s, i.Interaction, fmt.Sprintf("The calculated fee is %s ISK", formattedISK))
 	}
 }
 
