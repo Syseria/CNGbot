@@ -511,6 +511,30 @@ var Commands = []*discordgo.ApplicationCommand{
 			},
 		},
 	},
+	{
+		Name:		 "courier_fee",
+		Description: "Calculates the fee for your courier contract",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionNumber,
+				Name:		 "Volume",
+				Description: "The volume of the cargo to be hauled. Defaults to 0",
+				Required:	 false,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionInteger,
+				Name:		 "Jumps",
+				Description: "The numbers of jumps from start to finish. Defaults to 1",
+				Required:	 false,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionNumber,
+				Name:		 "Estimate",
+				Description: "The estimated value of the cargo to be hauled. Defaults to 0",
+				Required:	 false,
+			},
+		},
+	},
 }
 
 func RegisterCommands(s *discordgo.Session) error {
@@ -1755,6 +1779,7 @@ func InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			"`/post_donations_leaderboard` - Posts the leaderboard to the configured donations channel.\n" +
 			"`/import_donations [data] [file] [role]` - Import pasted corporation wallet journal data to backfill donation history.\n" +
 			"`/id <target>` - Output the Discord ID and mention format for a user, channel, role, or emoji.\n\n" +
+			"`/courier_fee [volume] [jumps] [estimated price]` - Calculates the fee for a courier contract." +
 			"__Debug__\n" +
 			"`/toggle_logs` - Toggle posting role addition/removal logs to the designated channel.\n" +
 			"`/set_log_channel <channel>` - Set the channel where logs should be posted."
@@ -2605,6 +2630,35 @@ func InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 		msg := fmt.Sprintf("Successfully imported %d new donations (%d duplicates skipped) for corporation %s.", imported, dups, corpName)
 		sendResponse(s, i.Interaction, donations.SanitizeText(msg))
+
+	case "courier_fee":
+		const baseFee float64 = 0.05
+		const jumpFee float64 = 0.001
+		
+		var volume float64 = 0.0
+		var jumps int64 = 0
+		var estimate float64 = 0.0
+		
+		if opt := getOption(data.Options, "volume"); opt != nil && opt.FloatValue() > 0.0 {
+			volume = opt.FloatValue()
+		} else {
+			sendResponse(s, i.Interaction, fmt.Sprintf("The volume must be provided and greater than 0.0. Volume given: %.2f", opt.FloatValue()))
+		}
+		if opt := getOption(data.Options, "jumps"); opt != nil && opt.IntValue() > 0 {
+			jumps = opt.IntValue()
+		} else {
+			sendResponse(s, i.Interaction, fmt.Sprintf("The jump counts must be provided and greater than 0. Jumps count given: %d", opt.IntValue()))
+		}
+		if opt := getOption(data.Options, "estimate"); opt != nil && opt.FloatValue() > 0.0 {
+			estimate = opt.FloatValue()
+		} else {
+			sendResponse(s, i.Interaction, fmt.Sprintf("The estimate must be provided and greater than 0.0. Estimate given: %.2f", opt.FloatValue()))
+		}
+
+		var usingEstimate float64 = estimate * (baseFee + jumpFee * float64(jumps))
+		var usingVolume float64 = (volume / 100) + baseFee + jumpFee * float64(jumps)
+
+		sendResponse(s, i.Interaction, fmt.Sprintf("The calculated fee is %.2f ISK", max(usingEstimate, usingVolume)))
 	}
 }
 

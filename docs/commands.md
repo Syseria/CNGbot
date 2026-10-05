@@ -44,3 +44,4 @@ Here is a full list of all available commands for the CNG Bot and what they do.
 * `/map_standing_excellent`: Map a Discord role to EVE Online Excellent standing.
 * `/char_info`: Display detailed mapping, exclusion status, and automatically assigned roles for a Discord user.
 * `/id`: Get the Discord ID and mention format for a user, channel, role, or emoji.
+* `/courier_fee`: Calculates the fee for a courier contract.
