@@ -517,19 +517,19 @@ var Commands = []*discordgo.ApplicationCommand{
 		Options: []*discordgo.ApplicationCommandOption{
 			{
 				Type:        discordgo.ApplicationCommandOptionNumber,
-				Name:		 "Volume",
+				Name:		 "volume",
 				Description: "The volume of the cargo to be hauled. Defaults to 0",
 				Required:	 false,
 			},
 			{
 				Type:        discordgo.ApplicationCommandOptionInteger,
-				Name:		 "Jumps",
+				Name:		 "jumps",
 				Description: "The numbers of jumps from start to finish. Defaults to 1",
 				Required:	 false,
 			},
 			{
 				Type:        discordgo.ApplicationCommandOptionNumber,
-				Name:		 "Estimate",
+				Name:		 "estimate",
 				Description: "The estimated value of the cargo to be hauled. Defaults to 0",
 				Required:	 false,
 			},
