@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,6 +47,18 @@ type fleetMember struct {
 	CharacterID   int    `json:"character_id"`
 	Role          string `json:"role"`
 	SolarSystemID int    `json:"solar_system_id"`
+}
+
+// esiWing and esiSquad mirror entries of GET /fleets/{id}/wings/.
+type esiWing struct {
+	ID     int64      `json:"id"`
+	Name   string     `json:"name"`
+	Squads []esiSquad `json:"squads"`
+}
+
+type esiSquad struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 var warnMu sync.Mutex
@@ -310,6 +324,14 @@ func checkGuild(dg *discordgo.Session, guildID string) {
 
 	now := time.Now().Unix()
 	cooldown := int64(inviteCooldown / time.Second)
+
+	// Invites must target a wing/squad; resolve them once for the fleet.
+	wingID, squadID, err := getFleetSquad(pick.client, pick.fleetID)
+	if err != nil {
+		log.Printf("[Fleet] Guild %s: failed to resolve invite squad in fleet %d: %v", guildID, pick.fleetID, err)
+		return
+	}
+
 	var invited []int
 	for charID := range allianceChars {
 		if charID == pick.charID {
@@ -336,7 +358,7 @@ func checkGuild(dg *discordgo.Session, guildID string) {
 		// Record the attempt regardless of outcome so declined invites and
 		// offline/already-in-another-fleet characters are not hammered.
 		_ = db.SetFleetInvite(charID, now)
-		if err := sendInvite(pick.client, pick.fleetID, charID); err != nil {
+		if err := sendInvite(pick.client, pick.fleetID, wingID, squadID, charID); err != nil {
 			log.Printf("[Fleet] Guild %s: invite for character %d failed: %v", guildID, charID, err)
 			continue
 		}
@@ -415,11 +437,54 @@ func getFleetMembers(client *http.Client, fleetID int64) (map[int]fleetMember, e
 	return members, nil
 }
 
-// sendInvite invites a character into the fleet as a regular fleet member.
-func sendInvite(client *http.Client, fleetID int64, charID int) error {
+// getFleetSquad returns the fleet's first wing and a squad in it, creating a
+// squad if the wing has none, because ESI invites must target wing and squad.
+func getFleetSquad(client *http.Client, fleetID int64) (int64, int64, error) {
+	// Two attempts: the second fetches the ID of a squad just created.
+	for attempt := 0; attempt < 2; attempt++ {
+		resp, err := client.Get(fmt.Sprintf("%s/fleets/%d/wings/", esiBase, fleetID))
+		if err != nil {
+			return 0, 0, fmt.Errorf("failed to request ESI fleet wings: %w", err)
+		}
+		if resp.StatusCode != 200 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			_ = resp.Body.Close()
+			return 0, 0, fmt.Errorf("ESI fleet wings returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+		var wings []esiWing
+		decodeErr := json.NewDecoder(resp.Body).Decode(&wings)
+		_ = resp.Body.Close()
+		if decodeErr != nil {
+			return 0, 0, fmt.Errorf("error decoding ESI fleet wings: %w", decodeErr)
+		}
+		if len(wings) == 0 {
+			break
+		}
+		if len(wings[0].Squads) > 0 {
+			return wings[0].ID, wings[0].Squads[0].ID, nil
+		}
+		// Wing exists but has no squads; create one and re-fetch to learn its ID.
+		createResp, err := client.Post(fmt.Sprintf("%s/fleets/%d/wings/%d/squads/", esiBase, fleetID, wings[0].ID), "application/json", nil)
+		if err != nil {
+			return 0, 0, fmt.Errorf("failed to create ESI fleet squad: %w", err)
+		}
+		_, _ = io.Copy(io.Discard, createResp.Body)
+		_ = createResp.Body.Close()
+		if createResp.StatusCode < 200 || createResp.StatusCode > 299 {
+			return 0, 0, fmt.Errorf("ESI fleet squad creation returned status %d", createResp.StatusCode)
+		}
+	}
+	return 0, 0, fmt.Errorf("fleet %d has no wing with a squad to invite into", fleetID)
+}
+
+// sendInvite invites a character into the fleet's first squad as a regular
+// squad member.
+func sendInvite(client *http.Client, fleetID, wingID, squadID int64, charID int) error {
 	body, err := json.Marshal(map[string]interface{}{
 		"character_id": charID,
-		"role":         "fleet_member",
+		"role":         "squad_member",
+		"wing_id":      wingID,
+		"squad_id":     squadID,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to marshal fleet invite request: %w", err)
@@ -438,7 +503,10 @@ func sendInvite(client *http.Client, fleetID int64, charID int) error {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return fmt.Errorf("ESI fleet invite returned status %d", resp.StatusCode)
+		// Include the body: ESI explains 400s (offline character, full
+		// squad, already invited) there and it is the only way to tell why.
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("ESI fleet invite returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 	return nil
 }

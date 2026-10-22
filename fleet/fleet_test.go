@@ -63,6 +63,10 @@ func TestGetFleetMembers(t *testing.T) {
 func TestSendInvite(t *testing.T) {
 	var gotBody string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/fleets/12345/wings/" {
+			_, _ = w.Write([]byte(`[{"id":7,"name":"Wing 1","squads":[{"id":9,"name":"Squad 1"}]}]`))
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
 		gotBody = string(body)
 		w.WriteHeader(http.StatusOK)
@@ -73,25 +77,93 @@ func TestSendInvite(t *testing.T) {
 	esiBase = server.URL
 	defer func() { esiBase = origBase }()
 
-	if err := sendInvite(http.DefaultClient, 12345, 42); err != nil {
+	if err := sendInvite(http.DefaultClient, 12345, 7, 9, 42); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(gotBody, `"character_id":42`) {
-		t.Errorf("expected body to contain character_id 42, got: %s", gotBody)
-	}
-	if !strings.Contains(gotBody, `"role":"fleet_member"`) {
-		t.Errorf("expected body to contain role fleet_member, got: %s", gotBody)
+	for _, want := range []string{`"character_id":42`, `"role":"squad_member"`, `"wing_id":7`, `"squad_id":9`} {
+		if !strings.Contains(gotBody, want) {
+			t.Errorf("expected body to contain %s, got: %s", want, gotBody)
+		}
 	}
 
 	rejectServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"Character is not eligible for the fleet"}`))
 	}))
 	defer rejectServer.Close()
 	esiBase = rejectServer.URL
 
-	if err := sendInvite(http.DefaultClient, 12345, 42); err == nil {
-		t.Error("expected error for 403 response, got nil")
+	err := sendInvite(http.DefaultClient, 12345, 7, 9, 42)
+	if err == nil {
+		t.Error("expected error for 400 response, got nil")
+	} else if !strings.Contains(err.Error(), "Character is not eligible for the fleet") {
+		t.Errorf("expected error to include the ESI error body, got: %v", err)
 	}
+}
+
+func TestGetFleetSquad(t *testing.T) {
+	origBase := esiBase
+	defer func() { esiBase = origBase }()
+
+	t.Run("existing squad", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/fleets/12345/wings/" {
+				t.Errorf("unexpected path %q", r.URL.Path)
+			}
+			_, _ = w.Write([]byte(`[{"id":7,"name":"Wing 1","squads":[{"id":9,"name":"Squad 1"}]}]`))
+		}))
+		defer server.Close()
+		esiBase = server.URL
+
+		wingID, squadID, err := getFleetSquad(http.DefaultClient, 12345)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if wingID != 7 || squadID != 9 {
+			t.Errorf("expected wing 7 squad 9, got %d/%d", wingID, squadID)
+		}
+	})
+
+	t.Run("creates squad when wing has none", func(t *testing.T) {
+		var created bool
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/fleets/12345/wings/":
+				if created {
+					_, _ = w.Write([]byte(`[{"id":7,"name":"Wing 1","squads":[{"id":11,"name":"Squad 2"}]}]`))
+				} else {
+					_, _ = w.Write([]byte(`[{"id":7,"name":"Wing 1","squads":[]}]`))
+				}
+			case "/fleets/12345/wings/7/squads/":
+				created = true
+				w.WriteHeader(http.StatusOK)
+			default:
+				t.Errorf("unexpected path %q", r.URL.Path)
+			}
+		}))
+		defer server.Close()
+		esiBase = server.URL
+
+		wingID, squadID, err := getFleetSquad(http.DefaultClient, 12345)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if wingID != 7 || squadID != 11 {
+			t.Errorf("expected wing 7 squad 11, got %d/%d", wingID, squadID)
+		}
+	})
+
+	t.Run("wings error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+		}))
+		defer server.Close()
+		esiBase = server.URL
+
+		if _, _, err := getFleetSquad(http.DefaultClient, 12345); err == nil {
+			t.Error("expected error for 403 response, got nil")
+		}
+	})
 }
 
 func TestFilterByAlliance(t *testing.T) {
