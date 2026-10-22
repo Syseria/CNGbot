@@ -26,7 +26,7 @@ var (
 
 const (
 	pollInterval   = 60 * time.Second
-	inviteCooldown = 10 * time.Minute
+	inviteCooldown = 1 * time.Minute
 	warnInterval   = 10 * time.Minute
 )
 
