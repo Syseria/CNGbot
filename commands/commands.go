@@ -340,7 +340,7 @@ var Commands = []*discordgo.ApplicationCommand{
 	},
 	{
 		Name:        "link",
-		Description: "Get a private link to connect your EVE character to the bot with fleet invite scopes",
+		Description: "Get a link to log in your EVE character with the scopes needed for fleet invites",
 	},
 	{
 		Name:        "set_greeting",
@@ -1785,7 +1785,7 @@ func InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			"`/toggle_automap` - Toggle automatic character mapping of new server members on join.\n" +
 			"`/toggle_auto_fleet_invite` - Toggle auto-inviting SeAT members in wormhole space into the linked character's fleet.\n" +
 			"`/set_fleet_alliance` - Set the alliance-mapped Discord role whose SeAT members are auto-invited (omit role to clear).\n" +
-			"`/link` - Get a private link to connect your EVE character to the bot (fleet invite permissions).\n" +
+			"`/link` - Get a link to log in your EVE character for the fleet invite feature.\n" +
 			"`/toggle_2fa` - Toggle requiring 2FA verification via EVE-mail before assigning mapped Discord roles.\n" +
 			"`/set_greeting [channel] [message]` - Configure automatic greeting message for new members on join (omit options to disable).\n" +
 			"`/set_guest [role]` - Set the guest role applied to mapped users whose Corp/Alliance is not yet mapped (omit option to disable).\n" +
@@ -2066,8 +2066,8 @@ func InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		})
 
 	case "link":
-		link := fmt.Sprintf("%s/auth/discord/login?guild_id=%s&mode=character", config.GetDashboardURL(), i.GuildID)
-		sendResponse(s, i.Interaction, "Link your EVE character to the bot (fleet invite permissions) - log in with Discord, then approve EVE SSO: "+link)
+		link := fmt.Sprintf("%s/auth/eve/login?guild_id=%s&mode=character", config.GetDashboardURL(), i.GuildID)
+		sendResponse(s, i.Interaction, "Log in with your EVE character to enable fleet invites (fleet scopes): "+link)
 
 	case "set_log_channel":
 		chanOpt := getOption(data.Options, "channel")

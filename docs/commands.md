@@ -36,7 +36,7 @@ Here is a full list of all available commands for the CNG Bot and what they do.
 * `/toggle_automap`: Toggle automatic character mapping of new server members on join.
 * `/toggle_auto_fleet_invite`: Toggle auto-inviting SeAT members in wormhole space into the fleet of the linked EVE character (must be fleet boss). The acting character's ESI token must include the esi-fleets scopes (dashboard re-link or all-scopes REFRESH_TOKEN).
 * `/set_fleet_alliance`: Set the Discord role mapped to an EVE alliance (via `/map_alliance`) whose SeAT members are auto-invited when a linked fleet boss is in J-space (omit role to clear).
-* `/link`: Get a private one-click link to connect your EVE character to the bot with the scopes needed for auto fleet invite (log in with Discord, approve EVE SSO).
+* `/link`: Get a link to log in your EVE character directly via EVE SSO with the scopes needed for auto fleet invite. Only characters in the alliance set via `/set_fleet_alliance` are accepted.
 * `/set_greeting`: Configure automatic greeting message for new members on join.
 * `/set_guest`: Set the guest role applied to mapped users whose Corp or Alliance is not yet mapped.
 * `/set_missing_seat_role`: Set a role to assign to users who need to log into SeAT but haven't.

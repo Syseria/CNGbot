@@ -97,55 +97,28 @@ func testSessionWithGuilds(guildIDs ...string) *discordgo.Session {
 	return &discordgo.Session{State: state}
 }
 
-func TestUserIsGuildMember(t *testing.T) {
-	stubDiscordGuildsAPI(t)
-
-	dg := testSessionWithGuilds("guild_100")
-
-	if ok, err := userIsGuildMember("test_token", "guild_100", dg); err != nil || !ok {
-		t.Fatalf("expected member with bot present, got ok=%v err=%v", ok, err)
-	}
-
-	if ok, err := userIsGuildMember("test_token", "guild_100", nil); err != nil || ok {
-		t.Fatalf("expected bot-not-present with nil dg, got ok=%v err=%v", ok, err)
-	}
-
-	if ok, err := userIsGuildMember("test_token", "guild_300", dg); err != nil || ok {
-		t.Fatalf("expected non-member false, got ok=%v err=%v", ok, err)
-	}
-
-	if ok, err := userIsGuildMember("bad_token", "guild_100", dg); err == nil || ok {
-		t.Fatalf("expected API error, got ok=%v err=%v", ok, err)
-	}
-}
-
 func TestHandleEveLogin_CharacterMode(t *testing.T) {
 	os.Setenv("EVE_CLIENT_ID", "test_eve_client_id")
 	defer os.Unsetenv("EVE_CLIENT_ID")
-	stubDiscordGuildsAPI(t)
 
-	dg := testSessionWithGuilds("guild_100")
-	handler := NewWebHandler(dg)
+	handler := NewWebHandler(nil)
 
-	// Regular member (no admin guilds) can link their own character.
-	session, err := Store.CreateSession("user123", "TestUser", "avatar1", "test_token", nil)
-	if err != nil {
-		t.Fatalf("failed to create session: %v", err)
-	}
-
+	// No Discord session needed: the /link flow goes straight to EVE SSO.
 	req := httptest.NewRequest("GET", "/auth/eve/login?guild_id=guild_100&mode=character", nil)
-	req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: session.ID})
 	w := httptest.NewRecorder()
 
 	handler.HandleEveLogin(w, req)
 
 	if w.Code != http.StatusSeeOther {
-		t.Fatalf("expected 303 redirect for member character mode, got %d", w.Code)
+		t.Fatalf("expected 303 redirect for character mode, got %d", w.Code)
 	}
 
 	u, err := url.Parse(w.Header().Get("Location"))
 	if err != nil {
 		t.Fatalf("bad location: %v", err)
+	}
+	if !strings.Contains(u.Host, "login.eveonline.com") {
+		t.Fatalf("expected EVE SSO redirect, got %s", u.String())
 	}
 	state := u.Query().Get("state")
 	data, ok := Store.oauthStates[state]
@@ -153,15 +126,14 @@ func TestHandleEveLogin_CharacterMode(t *testing.T) {
 		t.Fatalf("expected saved state with mode=character for guild_100, got %+v", data)
 	}
 
-	// Non-member is rejected.
-	reqForbidden := httptest.NewRequest("GET", "/auth/eve/login?guild_id=guild_300&mode=character", nil)
-	reqForbidden.AddCookie(&http.Cookie{Name: SessionCookieName, Value: session.ID})
-	wForbidden := httptest.NewRecorder()
+	// Guild mode still requires a session (redirects to landing when absent).
+	reqNoSession := httptest.NewRequest("GET", "/auth/eve/login?guild_id=guild_100", nil)
+	wNoSession := httptest.NewRecorder()
 
-	handler.HandleEveLogin(wForbidden, reqForbidden)
+	handler.HandleEveLogin(wNoSession, reqNoSession)
 
-	if wForbidden.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for non-member, got %d", wForbidden.Code)
+	if wNoSession.Code != http.StatusSeeOther || wNoSession.Header().Get("Location") != "/" {
+		t.Fatalf("expected redirect to / for guild mode without session, got %d %s", wNoSession.Code, wNoSession.Header().Get("Location"))
 	}
 
 	// Admin flow without mode keeps the admin gate and stores no mode.
@@ -189,6 +161,38 @@ func TestHandleEveLogin_CharacterMode(t *testing.T) {
 	adminData, ok := Store.oauthStates[uAdmin.Query().Get("state")]
 	if !ok || adminData.Mode != "" {
 		t.Fatalf("expected admin state without mode, got %+v", adminData)
+	}
+}
+
+func TestCharacterInAlliance(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var ids []int
+		_ = json.NewDecoder(r.Body).Decode(&ids)
+		if len(ids) == 1 && ids[0] == 42 {
+			_, _ = w.Write([]byte(`[{"character_id":42,"corporation_id":1,"alliance_id":99000001}]`))
+			return
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	old := esiAffiliationURL
+	esiAffiliationURL = srv.URL
+	defer func() { esiAffiliationURL = old }()
+
+	ok, err := characterInAlliance(42, 99000001)
+	if err != nil || !ok {
+		t.Fatalf("expected member of alliance, got ok=%v err=%v", ok, err)
+	}
+
+	ok, err = characterInAlliance(42, 99000002)
+	if err != nil || ok {
+		t.Fatalf("expected non-member, got ok=%v err=%v", ok, err)
+	}
+
+	ok, err = characterInAlliance(7, 99000001)
+	if err != nil || ok {
+		t.Fatalf("expected missing character to be non-member, got ok=%v err=%v", ok, err)
 	}
 }
 
