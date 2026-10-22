@@ -123,3 +123,46 @@ func TestFilterByAlliance(t *testing.T) {
 		t.Error("expected error for 500 response, got nil")
 	}
 }
+
+func TestFetchESILocation(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		body   string
+		want   int
+	}{
+		{"ok", http.StatusOK, `{"solar_system_id":31000513}`, 31000513},
+		{"offline", http.StatusNotFound, `{"error":"Character not found"}`, 0},
+		{"server error", http.StatusInternalServerError, `{}`, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/characters/12345/location/" {
+					t.Errorf("unexpected path %q", r.URL.Path)
+				}
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+
+			origBase := esiBase
+			esiBase = server.URL
+			defer func() { esiBase = origBase }()
+
+			got, err := fetchESILocation(server.Client(), 12345)
+			if tc.status == http.StatusInternalServerError {
+				if err == nil {
+					t.Fatal("expected error for 500 response, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("expected solar system %d, got %d", tc.want, got)
+			}
+		})
+	}
+}

@@ -324,11 +324,11 @@ var Commands = []*discordgo.ApplicationCommand{
 	},
 	{
 		Name:        "toggle_auto_fleet_invite",
-		Description: "Toggle auto-inviting SeAT members in wormhole space into the fleet of the linked EVE character",
+		Description: "Toggle auto-inviting linked alliance members in wormhole space into the fleet of a linked fleet boss",
 	},
 	{
 		Name:        "set_fleet_alliance",
-		Description: "Set the alliance-mapped Discord role whose SeAT members are auto-invited (omit to clear)",
+		Description: "Set the alliance-mapped Discord role whose linked characters are auto-invited (omit to clear)",
 		Options: []*discordgo.ApplicationCommandOption{
 			{
 				Type:        discordgo.ApplicationCommandOptionRole,
@@ -1783,8 +1783,8 @@ func InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			"`/sync` - Force an immediate manual verification of all mapped users' roles.\n" +
 			"`/char_info <user>` - Display detailed mapping, exclusion status, and automatically assigned roles for a Discord user.\n" +
 			"`/toggle_automap` - Toggle automatic character mapping of new server members on join.\n" +
-			"`/toggle_auto_fleet_invite` - Toggle auto-inviting SeAT members in wormhole space into the linked character's fleet.\n" +
-			"`/set_fleet_alliance` - Set the alliance-mapped Discord role whose SeAT members are auto-invited (omit role to clear).\n" +
+			"`/toggle_auto_fleet_invite` - Toggle auto-inviting linked alliance members in wormhole space into a linked fleet boss's fleet.\n" +
+			"`/set_fleet_alliance` - Set the alliance-mapped Discord role whose linked characters are auto-invited (omit role to clear).\n" +
 			"`/link` - Get a link to log in your EVE character for the fleet invite feature.\n" +
 			"`/toggle_2fa` - Toggle requiring 2FA verification via EVE-mail before assigning mapped Discord roles.\n" +
 			"`/set_greeting [channel] [message]` - Configure automatic greeting message for new members on join (omit options to disable).\n" +

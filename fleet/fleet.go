@@ -13,7 +13,6 @@ import (
 	"evemaildiscord/config"
 	"evemaildiscord/db"
 	"evemaildiscord/esi"
-	"evemaildiscord/seat"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -50,6 +49,69 @@ type fleetMember struct {
 
 var warnMu sync.Mutex
 var lastWarn = make(map[string]int64) // "guildID|msg" -> unix
+
+// charIDSet returns the keys of a token map as a set.
+func charIDSet(tokens map[int]string) map[int]bool {
+	ids := make(map[int]bool, len(tokens))
+	for id := range tokens {
+		ids[id] = true
+	}
+	return ids
+}
+
+type cachedClient struct {
+	refreshToken string
+	client       *http.Client
+}
+
+var (
+	oauthClientsMu sync.Mutex
+	oauthClients   = make(map[int]cachedClient) // charID -> cached authenticated client
+)
+
+// oauthClientFor returns a cached authenticated client for a character's
+// linked refresh token, rebuilding it only when the token changes. This keeps
+// the poller from re-authenticating against EVE SSO on every cycle.
+func oauthClientFor(charID int, refreshToken string) *http.Client {
+	oauthClientsMu.Lock()
+	cached, ok := oauthClients[charID]
+	oauthClientsMu.Unlock()
+	if ok && cached.refreshToken == refreshToken {
+		return cached.client
+	}
+	client := esi.GetOAuthHTTPClientForToken(refreshToken)
+	if client == nil {
+		return nil
+	}
+	oauthClientsMu.Lock()
+	oauthClients[charID] = cachedClient{refreshToken: refreshToken, client: client}
+	oauthClientsMu.Unlock()
+	return client
+}
+
+// fetchESILocation returns the character's current solar system using its own
+// linked ESI token. A 404 means the character is offline and cannot be
+// invited, so it is reported as no location (0, nil).
+func fetchESILocation(client *http.Client, charID int) (int, error) {
+	resp, err := client.Get(fmt.Sprintf("%s/characters/%d/location/", esiBase, charID))
+	if err != nil {
+		return 0, fmt.Errorf("failed to request ESI location: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return 0, nil
+	}
+	if resp.StatusCode != 200 {
+		return 0, fmt.Errorf("ESI character location returned status %d", resp.StatusCode)
+	}
+	var loc struct {
+		SolarSystemID int `json:"solar_system_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&loc); err != nil {
+		return 0, fmt.Errorf("error decoding ESI location: %w", err)
+	}
+	return loc.SolarSystemID, nil
+}
 
 // PollAutoInvite runs the auto-invite check every pollInterval, starting immediately.
 func PollAutoInvite(dg *discordgo.Session) {
@@ -159,18 +221,14 @@ func bossCandidateFor(dg *discordgo.Session, guildID string, client *http.Client
 // findBossCandidates checks every character linked for this guild (personal
 // dashboard links first, then the legacy guild/env character) and returns the
 // ones that are fleet bosses of a wormhole-space fleet.
-func findBossCandidates(dg *discordgo.Session, guildID string, allianceChars map[int]bool) []bossCandidate {
+func findBossCandidates(dg *discordgo.Session, guildID string, tokens map[int]string, allianceChars map[int]bool) []bossCandidate {
 	var candidates []bossCandidate
 
-	tokens, err := db.GetGuildCharacterTokens(guildID)
-	if err != nil {
-		log.Printf("[Fleet] Guild %s: failed to load linked characters: %v", guildID, err)
-	}
 	for charID, token := range tokens {
 		if !allianceChars[charID] {
 			continue
 		}
-		client := esi.GetOAuthHTTPClientForToken(token)
+		client := oauthClientFor(charID, token)
 		if client == nil {
 			continue
 		}
@@ -202,7 +260,7 @@ func findBossCandidates(dg *discordgo.Session, guildID string, allianceChars map
 		}
 	}
 	if len(tokens) == 0 && !legacyLinked {
-		warnThrottled(dg, guildID, "Auto fleet invite is enabled but no EVE character has been linked for it. Fleet bosses can link their personal character via the dashboard (Link EVE Character).")
+		warnThrottled(dg, guildID, "Auto fleet invite is enabled but no EVE character has been linked for it. Fleet bosses can link their personal character via /link.")
 	}
 	return candidates
 }
@@ -217,27 +275,27 @@ func checkGuild(dg *discordgo.Session, guildID string) {
 		return
 	}
 
-	seatChars, err := seat.GetValidSeatCharacters(guildID)
+	tokens, err := db.GetGuildCharacterTokens(guildID)
 	if err != nil {
-		log.Printf("[Fleet] Guild %s: failed to fetch SeAT characters: %v", guildID, err)
-		return
-	}
-	allianceChars, err := filterByAlliance(seatChars, allianceID)
-	if err != nil {
-		log.Printf("[Fleet] Guild %s: failed to fetch character affiliations: %v", guildID, err)
-		return
-	}
-	if len(allianceChars) == 0 {
-		return
+		log.Printf("[Fleet] Guild %s: failed to load linked characters: %v", guildID, err)
 	}
 
-	baseURL, apiKey, err := seat.GetSeatConfig(guildID)
-	if err != nil {
-		log.Printf("[Fleet] Guild %s: failed to resolve SeAT config: %v", guildID, err)
-		return
+	// Only linked characters can be checked and invited: their own ESI token
+	// provides both fleet membership and real-time location.
+	allianceChars := map[int]bool{}
+	if len(tokens) > 0 {
+		allianceChars, err = filterByAlliance(charIDSet(tokens), allianceID)
+		if err != nil {
+			log.Printf("[Fleet] Guild %s: failed to fetch character affiliations: %v", guildID, err)
+			return
+		}
+		if len(allianceChars) == 0 {
+			warnThrottled(dg, guildID, fmt.Sprintf("Auto fleet invite: none of the linked characters is in alliance %d. Check /set_fleet_alliance or have members run /link with a character from that alliance.", allianceID))
+			return
+		}
 	}
 
-	candidates := findBossCandidates(dg, guildID, allianceChars)
+	candidates := findBossCandidates(dg, guildID, tokens, allianceChars)
 	if len(candidates) == 0 {
 		return // no linked character is currently a fleet boss in wormhole space
 	}
@@ -263,7 +321,11 @@ func checkGuild(dg *discordgo.Session, guildID string) {
 		if last, err := db.GetFleetLastInvite(charID); err == nil && now-last < cooldown {
 			continue
 		}
-		sysID, err := seat.FetchCharacterSolarSystem(baseURL, apiKey, charID)
+		client := oauthClientFor(charID, tokens[charID])
+		if client == nil {
+			continue
+		}
+		sysID, err := fetchESILocation(client, charID)
 		if err != nil {
 			log.Printf("[Fleet] Guild %s: failed to fetch location for character %d: %v", guildID, charID, err)
 			continue
