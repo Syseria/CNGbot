@@ -83,6 +83,17 @@ func createOrMigrateTables(database *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_donation_record_receiver ON DonationRecord(receiver_corp_id);
 		CREATE INDEX IF NOT EXISTS idx_donation_record_donor ON DonationRecord(donor_id);
+		CREATE TABLE IF NOT EXISTS fleet_invite_state (
+			eve_id INTEGER PRIMARY KEY,
+			last_invite_unix INTEGER NOT NULL DEFAULT 0
+		);
+		CREATE TABLE IF NOT EXISTS character_tokens (
+			eve_character_id INTEGER PRIMARY KEY,
+			refresh_token TEXT NOT NULL DEFAULT '',
+			guild_id TEXT NOT NULL DEFAULT '',
+			discord_user_id TEXT NOT NULL DEFAULT '',
+			linked_at DATETIME
+		);
 	`)
 	if err != nil {
 		return fmt.Errorf("error creating base tables: %w", err)
@@ -524,6 +535,52 @@ func SetMailState(guildID string, lastMailID int) error {
 			last_mail_id = excluded.last_mail_id
 	`, guildID, lastMailID)
 	return err
+}
+
+// GetFleetLastInvite returns the unix timestamp of the last auto fleet invite
+// attempt for the given EVE character, or 0 if no attempt was recorded.
+func GetFleetLastInvite(eveID int) (int64, error) {
+	var ts int64
+	err := DB.QueryRow("SELECT last_invite_unix FROM fleet_invite_state WHERE eve_id = ?", eveID).Scan(&ts)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return ts, err
+}
+
+// SetFleetInvite records the unix timestamp of the latest auto fleet invite attempt for the character.
+func SetFleetInvite(eveID int, unix int64) error {
+	_, err := DB.Exec("INSERT OR REPLACE INTO fleet_invite_state (eve_id, last_invite_unix) VALUES (?, ?)", eveID, unix)
+	return err
+}
+
+// SetCharacterToken stores the ESI refresh token a guild member linked for
+// their own character via the dashboard, replacing any previous token.
+func SetCharacterToken(eveID int, refreshToken, guildID, discordUserID string) error {
+	_, err := DB.Exec("INSERT OR REPLACE INTO character_tokens (eve_character_id, refresh_token, guild_id, discord_user_id, linked_at) VALUES (?, ?, ?, ?, ?)",
+		eveID, refreshToken, guildID, discordUserID, time.Now())
+	return err
+}
+
+// GetGuildCharacterTokens returns the character-linked ESI refresh tokens for
+// a guild, keyed by EVE character ID.
+func GetGuildCharacterTokens(guildID string) (map[int]string, error) {
+	rows, err := DB.Query("SELECT eve_character_id, refresh_token FROM character_tokens WHERE guild_id = ?", guildID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	tokens := make(map[int]string)
+	for rows.Next() {
+		var eveID int
+		var token string
+		if err := rows.Scan(&eveID, &token); err != nil {
+			return nil, err
+		}
+		tokens[eveID] = token
+	}
+	return tokens, rows.Err()
 }
 
 type GuildDonationSettings struct {

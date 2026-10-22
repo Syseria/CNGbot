@@ -24,6 +24,7 @@ type GuildCardView struct {
 type DashboardData struct {
 	User         *UserSession
 	Guilds       []GuildCardView
+	MemberGuilds []DiscordGuildInfo
 	BotInviteURL string
 }
 

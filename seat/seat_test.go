@@ -118,3 +118,104 @@ func TestGetValidSeatCharacters(t *testing.T) {
 		t.Errorf("expected character 9999 to be valid in SeAT")
 	}
 }
+
+func TestFetchCharacterSolarSystemFromLocationEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/characters/12345/location" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]int{"solar_system_id": 31000513})
+	}))
+	defer server.Close()
+
+	systemID, err := FetchCharacterSolarSystem(server.URL, "key", 12345)
+	if err != nil {
+		t.Fatalf("FetchCharacterSolarSystem failed: %v", err)
+	}
+	if systemID != 31000513 {
+		t.Errorf("expected solar system 31000513, got %d", systemID)
+	}
+}
+
+func TestFetchCharacterSolarSystemFromDetailLocation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v2/characters/12345/location" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Path == "/api/v2/characters/12345" {
+			_ = json.NewEncoder(w).Encode(map[string]map[string]int{
+				"location": {"solar_system_id": 31000752},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	systemID, err := FetchCharacterSolarSystem(server.URL, "key", 12345)
+	if err != nil {
+		t.Fatalf("FetchCharacterSolarSystem failed: %v", err)
+	}
+	if systemID != 31000752 {
+		t.Errorf("expected solar system 31000752, got %d", systemID)
+	}
+}
+
+func TestFetchCharacterSolarSystemStationIDIgnored(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v2/characters/12345/location" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Path == "/api/v2/characters/12345" {
+			_ = json.NewEncoder(w).Encode(map[string]map[string]int{
+				"location": {"id": 60003760},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	systemID, err := FetchCharacterSolarSystem(server.URL, "key", 12345)
+	if err != nil {
+		t.Fatalf("FetchCharacterSolarSystem failed: %v", err)
+	}
+	if systemID != 0 {
+		t.Errorf("expected solar system 0 for station id location, got %d", systemID)
+	}
+}
+
+func TestFetchCharacterSolarSystemServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "server error", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	_, err := FetchCharacterSolarSystem(server.URL, "key", 12345)
+	if err == nil {
+		t.Fatal("expected error when SeAT returns HTTP 500")
+	}
+	if err.Error() != "SeAT characters location endpoint returned HTTP 500 for character 12345" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestGetSeatConfigNotConfigured(t *testing.T) {
+	os.Unsetenv("SEAT_URL")
+	os.Unsetenv("SEAT_API")
+	os.Unsetenv("SEAT_API_KEY")
+
+	_, _, err := GetSeatConfig("")
+	if err == nil {
+		t.Fatal("expected error when SeAT is not configured")
+	}
+	if err.Error() != "SeAT is not configured (missing SEAT_URL or SEAT_API)" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}

@@ -2,6 +2,7 @@ package web
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 
 	"evemaildiscord/db"
 
+	"github.com/bwmarrin/discordgo"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -60,6 +62,172 @@ func setupTestDB(t *testing.T) {
 	}
 
 	db.DB = database
+}
+
+// stubDiscordGuildsAPI overrides discordAPIBase with a test server answering
+// GET /users/@me/guilds for bearer token "test_token" (401 for any other token).
+func stubDiscordGuildsAPI(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/users/@me/guilds" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer test_token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]discordUserGuild{
+			{ID: "guild_100", Name: "Alpha Server"},
+			{ID: "guild_200", Name: "Beta Server"},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	oldBase := discordAPIBase
+	discordAPIBase = srv.URL
+	t.Cleanup(func() { discordAPIBase = oldBase })
+}
+
+// testSessionWithGuilds builds a discordgo session whose state contains the given guild IDs.
+func testSessionWithGuilds(guildIDs ...string) *discordgo.Session {
+	state := discordgo.NewState()
+	for _, id := range guildIDs {
+		_ = state.GuildAdd(&discordgo.Guild{ID: id})
+	}
+	return &discordgo.Session{State: state}
+}
+
+func TestUserIsGuildMember(t *testing.T) {
+	stubDiscordGuildsAPI(t)
+
+	dg := testSessionWithGuilds("guild_100")
+
+	if ok, err := userIsGuildMember("test_token", "guild_100", dg); err != nil || !ok {
+		t.Fatalf("expected member with bot present, got ok=%v err=%v", ok, err)
+	}
+
+	if ok, err := userIsGuildMember("test_token", "guild_100", nil); err != nil || ok {
+		t.Fatalf("expected bot-not-present with nil dg, got ok=%v err=%v", ok, err)
+	}
+
+	if ok, err := userIsGuildMember("test_token", "guild_300", dg); err != nil || ok {
+		t.Fatalf("expected non-member false, got ok=%v err=%v", ok, err)
+	}
+
+	if ok, err := userIsGuildMember("bad_token", "guild_100", dg); err == nil || ok {
+		t.Fatalf("expected API error, got ok=%v err=%v", ok, err)
+	}
+}
+
+func TestHandleEveLogin_CharacterMode(t *testing.T) {
+	os.Setenv("EVE_CLIENT_ID", "test_eve_client_id")
+	defer os.Unsetenv("EVE_CLIENT_ID")
+	stubDiscordGuildsAPI(t)
+
+	dg := testSessionWithGuilds("guild_100")
+	handler := NewWebHandler(dg)
+
+	// Regular member (no admin guilds) can link their own character.
+	session, err := Store.CreateSession("user123", "TestUser", "avatar1", "test_token", nil)
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/auth/eve/login?guild_id=guild_100&mode=character", nil)
+	req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: session.ID})
+	w := httptest.NewRecorder()
+
+	handler.HandleEveLogin(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect for member character mode, got %d", w.Code)
+	}
+
+	u, err := url.Parse(w.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("bad location: %v", err)
+	}
+	state := u.Query().Get("state")
+	data, ok := Store.oauthStates[state]
+	if !ok || data.Mode != "character" || data.GuildID != "guild_100" {
+		t.Fatalf("expected saved state with mode=character for guild_100, got %+v", data)
+	}
+
+	// Non-member is rejected.
+	reqForbidden := httptest.NewRequest("GET", "/auth/eve/login?guild_id=guild_300&mode=character", nil)
+	reqForbidden.AddCookie(&http.Cookie{Name: SessionCookieName, Value: session.ID})
+	wForbidden := httptest.NewRecorder()
+
+	handler.HandleEveLogin(wForbidden, reqForbidden)
+
+	if wForbidden.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-member, got %d", wForbidden.Code)
+	}
+
+	// Admin flow without mode keeps the admin gate and stores no mode.
+	adminSession, err := Store.CreateSession("user123", "TestUser", "avatar1", "test_token", map[string]DiscordGuildInfo{
+		"guild_100": {ID: "guild_100", Name: "Alpha Server", HasAdmin: true},
+	})
+	if err != nil {
+		t.Fatalf("failed to create admin session: %v", err)
+	}
+
+	reqAdmin := httptest.NewRequest("GET", "/auth/eve/login?guild_id=guild_100", nil)
+	reqAdmin.AddCookie(&http.Cookie{Name: SessionCookieName, Value: adminSession.ID})
+	wAdmin := httptest.NewRecorder()
+
+	handler.HandleEveLogin(wAdmin, reqAdmin)
+
+	if wAdmin.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect for admin flow, got %d", wAdmin.Code)
+	}
+
+	uAdmin, err := url.Parse(wAdmin.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("bad location: %v", err)
+	}
+	adminData, ok := Store.oauthStates[uAdmin.Query().Get("state")]
+	if !ok || adminData.Mode != "" {
+		t.Fatalf("expected admin state without mode, got %+v", adminData)
+	}
+}
+
+func TestHandleDashboard_MemberGuilds(t *testing.T) {
+	setupTestDB(t)
+	stubDiscordGuildsAPI(t)
+
+	dg := testSessionWithGuilds("guild_100", "guild_200")
+	handler := NewWebHandler(dg)
+
+	adminGuilds := map[string]DiscordGuildInfo{
+		"guild_100": {ID: "guild_100", Name: "Alpha Server", HasAdmin: true},
+	}
+
+	session, err := Store.CreateSession("user123", "TestUser", "avatar1", "test_token", adminGuilds)
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/dashboard", nil)
+	req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: session.ID})
+	w := httptest.NewRecorder()
+
+	handler.HandleDashboard(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Your Servers") || !strings.Contains(body, "Link EVE Character") {
+		t.Errorf("expected member guilds section in dashboard body")
+	}
+	if !strings.Contains(body, "Beta Server") {
+		t.Errorf("expected member-only guild in dashboard body")
+	}
+	// guild_100 is an admin guild, guild_200 is member-only: exactly one character-mode link.
+	if n := strings.Count(body, "mode=character"); n != 1 {
+		t.Errorf("expected exactly 1 character-mode link, got %d", n)
+	}
 }
 
 func TestHandleIndex_Unauthenticated(t *testing.T) {
@@ -137,6 +305,7 @@ func TestHandleDiscordLogin(t *testing.T) {
 
 func TestHandleDashboard_And_GuildConfig(t *testing.T) {
 	setupTestDB(t)
+	stubDiscordGuildsAPI(t)
 
 	adminGuilds := map[string]DiscordGuildInfo{
 		"guild_100": {

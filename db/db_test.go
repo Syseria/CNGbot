@@ -149,6 +149,113 @@ func TestGuildIntegrationsAndMailState(t *testing.T) {
 	}
 }
 
+func TestFleetInviteState(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_fleet_invite.db")
+
+	database, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite: %v", err)
+	}
+	defer database.Close()
+
+	if err := createOrMigrateTables(database); err != nil {
+		t.Fatalf("createOrMigrateTables failed: %v", err)
+	}
+
+	oldDB := DB
+	DB = database
+	defer func() { DB = oldDB }()
+
+	// No row recorded yet
+	eveID := 95123
+	ts, err := GetFleetLastInvite(eveID)
+	if err != nil || ts != 0 {
+		t.Fatalf("expected 0 for unknown char, got %d (err: %v)", ts, err)
+	}
+
+	if err := SetFleetInvite(eveID, 1700000000); err != nil {
+		t.Fatalf("failed to set fleet invite: %v", err)
+	}
+
+	ts, err = GetFleetLastInvite(eveID)
+	if err != nil || ts != 1700000000 {
+		t.Fatalf("expected 1700000000, got %d (err: %v)", ts, err)
+	}
+
+	// Second set replaces the value
+	if err := SetFleetInvite(eveID, 1700001234); err != nil {
+		t.Fatalf("failed to update fleet invite: %v", err)
+	}
+
+	ts, err = GetFleetLastInvite(eveID)
+	if err != nil || ts != 1700001234 {
+		t.Fatalf("expected 1700001234 after replace, got %d (err: %v)", ts, err)
+	}
+}
+
+func TestCharacterTokens(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_character_tokens.db")
+
+	database, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite: %v", err)
+	}
+	defer database.Close()
+
+	if err := createOrMigrateTables(database); err != nil {
+		t.Fatalf("createOrMigrateTables failed: %v", err)
+	}
+
+	oldDB := DB
+	DB = database
+	defer func() { DB = oldDB }()
+
+	// Empty table returns empty map, no error
+	tokens, err := GetGuildCharacterTokens("g1")
+	if err != nil {
+		t.Fatalf("unexpected error on empty table: %v", err)
+	}
+	if tokens == nil || len(tokens) != 0 {
+		t.Fatalf("expected empty map, got %v", tokens)
+	}
+
+	// Two characters in g1, one in g2
+	if err := SetCharacterToken(1001, "tok_a", "g1", "user_1"); err != nil {
+		t.Fatalf("failed to set token for char 1001: %v", err)
+	}
+	if err := SetCharacterToken(1002, "tok_b", "g1", "user_2"); err != nil {
+		t.Fatalf("failed to set token for char 1002: %v", err)
+	}
+	if err := SetCharacterToken(2001, "tok_c", "g2", "user_3"); err != nil {
+		t.Fatalf("failed to set token for char 2001: %v", err)
+	}
+
+	tokens, err = GetGuildCharacterTokens("g1")
+	if err != nil {
+		t.Fatalf("failed to get tokens for g1: %v", err)
+	}
+	if len(tokens) != 2 || tokens[1001] != "tok_a" || tokens[1002] != "tok_b" {
+		t.Fatalf("expected exactly chars 1001/1002 with their tokens, got %v", tokens)
+	}
+
+	tokens, err = GetGuildCharacterTokens("g2")
+	if err != nil || len(tokens) != 1 || tokens[2001] != "tok_c" {
+		t.Fatalf("expected char 2001 with tok_c for g2, got %v (err: %v)", tokens, err)
+	}
+
+	// Re-linking replaces the token
+	if err := SetCharacterToken(1001, "tok_a_new", "g1", "user_1"); err != nil {
+		t.Fatalf("failed to relink char 1001: %v", err)
+	}
+
+	tokens, err = GetGuildCharacterTokens("g1")
+	if err != nil || len(tokens) != 2 || tokens[1001] != "tok_a_new" {
+		t.Fatalf("expected replaced token tok_a_new, got %v (err: %v)", tokens, err)
+	}
+}
+
 func TestDonationsDatabase(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_donations.db")

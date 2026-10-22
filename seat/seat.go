@@ -108,7 +108,9 @@ func FetchActiveUserCharacterIDs(baseURL, apiKey string) (map[int]bool, error) {
 	return validChars, nil
 }
 
-func GetValidSeatCharacters(guildID string) (map[int]bool, error) {
+// GetSeatConfig resolves the SeAT base URL and API key for a guild,
+// falling back to the global environment configuration.
+func GetSeatConfig(guildID string) (string, string, error) {
 	var baseURL, apiKey string
 
 	if guildID != "" {
@@ -126,9 +128,18 @@ func GetValidSeatCharacters(guildID string) (map[int]bool, error) {
 
 	if baseURL == "" || apiKey == "" {
 		if guildID != "" {
-			return nil, fmt.Errorf("SeAT is not configured for guild %s", guildID)
+			return "", "", fmt.Errorf("SeAT is not configured for guild %s", guildID)
 		}
-		return nil, fmt.Errorf("SeAT is not configured (missing SEAT_URL or SEAT_API)")
+		return "", "", fmt.Errorf("SeAT is not configured (missing SEAT_URL or SEAT_API)")
+	}
+
+	return baseURL, apiKey, nil
+}
+
+func GetValidSeatCharacters(guildID string) (map[int]bool, error) {
+	baseURL, apiKey, err := GetSeatConfig(guildID)
+	if err != nil {
+		return nil, err
 	}
 
 	chars, err := FetchActiveUserCharacterIDs(baseURL, apiKey)
@@ -137,4 +148,96 @@ func GetValidSeatCharacters(guildID string) (map[int]bool, error) {
 	}
 
 	return chars, nil
+}
+
+type seatCharLocation struct {
+	SolarSystemID *int `json:"solar_system_id"`
+	ID            *int `json:"id"`
+}
+
+type seatCharDetail struct {
+	SolarSystemID *int              `json:"solar_system_id"`
+	Location      *seatCharLocation `json:"location"`
+}
+
+// FetchCharacterSolarSystem returns the current solar system ID of a character
+// according to SeAT, or 0 if SeAT has no location data for the character.
+func FetchCharacterSolarSystem(baseURL, apiKey string, charID int) (int, error) {
+	if baseURL == "" || apiKey == "" {
+		return 0, fmt.Errorf("SeAT URL or API key is not configured")
+	}
+
+	baseURLTrimmed := strings.TrimRight(baseURL, "/")
+
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/api/v2/characters/%d/location", baseURLTrimmed, charID), nil)
+	if err != nil {
+		return 0, fmt.Errorf("error creating SeAT character location request: %w", err)
+	}
+	req.Header.Set("X-Token", apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("error requesting SeAT character location for character %d: %w", charID, err)
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		var loc seatCharLocation
+		decodeErr := json.NewDecoder(resp.Body).Decode(&loc)
+		_ = resp.Body.Close()
+		if decodeErr != nil {
+			return 0, fmt.Errorf("error decoding SeAT character location for character %d: %w", charID, decodeErr)
+		}
+		if loc.SolarSystemID != nil && *loc.SolarSystemID > 0 {
+			return *loc.SolarSystemID, nil
+		}
+	} else {
+		statusCode := resp.StatusCode
+		_ = resp.Body.Close()
+		if statusCode != http.StatusNotFound {
+			return 0, fmt.Errorf("SeAT characters location endpoint returned HTTP %d for character %d", statusCode, charID)
+		}
+	}
+
+	// Fall back to the character detail endpoint for SeAT versions
+	// that only expose location data there.
+	req, err = http.NewRequest("GET", fmt.Sprintf("%s/api/v2/characters/%d", baseURLTrimmed, charID), nil)
+	if err != nil {
+		return 0, fmt.Errorf("error creating SeAT character request: %w", err)
+	}
+	req.Header.Set("X-Token", apiKey)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err = httpClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("error requesting SeAT character %d: %w", charID, err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		return 0, fmt.Errorf("SeAT characters endpoint returned HTTP %d for character %d", resp.StatusCode, charID)
+	}
+
+	var detail seatCharDetail
+	decodeErr := json.NewDecoder(resp.Body).Decode(&detail)
+	_ = resp.Body.Close()
+	if decodeErr != nil {
+		return 0, fmt.Errorf("error decoding SeAT character %d: %w", charID, decodeErr)
+	}
+
+	if detail.Location != nil && detail.Location.SolarSystemID != nil && *detail.Location.SolarSystemID > 0 {
+		return *detail.Location.SolarSystemID, nil
+	}
+	if detail.SolarSystemID != nil && *detail.SolarSystemID > 0 {
+		return *detail.SolarSystemID, nil
+	}
+	if detail.Location != nil && detail.Location.ID != nil {
+		// SeAT sometimes stores a station/structure id in location.id,
+		// so only accept values in the solar system range.
+		if id := *detail.Location.ID; id >= 30000000 && id <= 32999999 {
+			return id, nil
+		}
+	}
+
+	return 0, nil
 }

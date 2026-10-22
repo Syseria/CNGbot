@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -320,6 +321,26 @@ var Commands = []*discordgo.ApplicationCommand{
 	{
 		Name:        "toggle_automap",
 		Description: "Toggle automatic character mapping of new server members on join",
+	},
+	{
+		Name:        "toggle_auto_fleet_invite",
+		Description: "Toggle auto-inviting SeAT members in wormhole space into the fleet of the linked EVE character",
+	},
+	{
+		Name:        "set_fleet_alliance",
+		Description: "Set the alliance-mapped Discord role whose SeAT members are auto-invited (omit to clear)",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionRole,
+				Name:        "role",
+				Description: "Discord role mapped to an EVE alliance via /map_alliance",
+				Required:    false,
+			},
+		},
+	},
+	{
+		Name:        "link",
+		Description: "Get a private link to connect your EVE character to the bot with fleet invite scopes",
 	},
 	{
 		Name:        "set_greeting",
@@ -1762,6 +1783,9 @@ func InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			"`/sync` - Force an immediate manual verification of all mapped users' roles.\n" +
 			"`/char_info <user>` - Display detailed mapping, exclusion status, and automatically assigned roles for a Discord user.\n" +
 			"`/toggle_automap` - Toggle automatic character mapping of new server members on join.\n" +
+			"`/toggle_auto_fleet_invite` - Toggle auto-inviting SeAT members in wormhole space into the linked character's fleet.\n" +
+			"`/set_fleet_alliance` - Set the alliance-mapped Discord role whose SeAT members are auto-invited (omit role to clear).\n" +
+			"`/link` - Get a private link to connect your EVE character to the bot (fleet invite permissions).\n" +
 			"`/toggle_2fa` - Toggle requiring 2FA verification via EVE-mail before assigning mapped Discord roles.\n" +
 			"`/set_greeting [channel] [message]` - Configure automatic greeting message for new members on join (omit options to disable).\n" +
 			"`/set_guest [role]` - Set the guest role applied to mapped users whose Corp/Alliance is not yet mapped (omit option to disable).\n" +
@@ -1974,6 +1998,76 @@ func InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			go roles.CheckRoles(s)
 			return nil
 		})
+
+	case "toggle_auto_fleet_invite":
+		db.ExecuteOrQueue(s, i.ChannelID, func() error {
+			var val string
+			err := db.DB.QueryRow("SELECT value FROM config WHERE guild_id = ? AND key = 'auto_fleet_invite_enabled'", guildID).Scan(&val)
+			if err == sql.ErrNoRows {
+				val = "0"
+			} else if err != nil {
+				return err
+			}
+			newVal := "1"
+			status := "enabled"
+			if val == "1" {
+				newVal = "0"
+				status = "disabled"
+			}
+			_, err = db.DB.Exec("INSERT OR REPLACE INTO config (guild_id, key, value) VALUES (?, 'auto_fleet_invite_enabled', ?)", guildID, newVal)
+			if err != nil {
+				return err
+			}
+			sendResponse(s, i.Interaction, fmt.Sprintf("Auto fleet invite is now %s. SeAT members in wormhole space will be auto-invited into the fleet of the linked EVE character, which must be the fleet boss.", status))
+			return nil
+		})
+
+	case "set_fleet_alliance":
+		roleOpt := getOption(data.Options, "role")
+		if roleOpt == nil {
+			db.ExecuteOrQueue(s, i.ChannelID, func() error {
+				_, err := db.DB.Exec("DELETE FROM config WHERE guild_id = ? AND key = 'fleet_alliance_id'", guildID)
+				if err != nil {
+					return err
+				}
+				sendResponse(s, i.Interaction, "Auto fleet invite alliance filter cleared. All SeAT members in wormhole space will be eligible again.")
+				return nil
+			})
+			return
+		}
+
+		var roleID string
+		if r := roleOpt.RoleValue(s, i.GuildID); r != nil {
+			roleID = r.ID
+		} else if str, ok := roleOpt.Value.(string); ok {
+			roleID = str
+		}
+		if roleID == "" {
+			sendResponse(s, i.Interaction, "Invalid role specified.")
+			return
+		}
+
+		db.ExecuteOrQueue(s, i.ChannelID, func() error {
+			var allianceID int
+			err := db.DB.QueryRow("SELECT alliance_id FROM alliance_to_role WHERE guild_id = ? AND role_id = ?", guildID, roleID).Scan(&allianceID)
+			if err == sql.ErrNoRows {
+				sendResponse(s, i.Interaction, fmt.Sprintf("Role <@&%s> is not mapped to an EVE alliance. Use /map_alliance first.", roleID))
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			_, err = db.DB.Exec("INSERT OR REPLACE INTO config (guild_id, key, value) VALUES (?, 'fleet_alliance_id', ?)", guildID, strconv.Itoa(allianceID))
+			if err != nil {
+				return err
+			}
+			sendResponse(s, i.Interaction, fmt.Sprintf("Auto fleet invite will serve alliance %d via role <@&%s>. SeAT members of that alliance in wormhole space will be auto-invited when a linked fleet boss is in a J-space fleet.", allianceID, roleID))
+			return nil
+		})
+
+	case "link":
+		link := fmt.Sprintf("%s/auth/discord/login?guild_id=%s&mode=character", config.GetDashboardURL(), i.GuildID)
+		sendResponse(s, i.Interaction, "Link your EVE character to the bot (fleet invite permissions) - log in with Discord, then approve EVE SSO: "+link)
 
 	case "set_log_channel":
 		chanOpt := getOption(data.Options, "channel")

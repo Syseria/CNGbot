@@ -14,6 +14,7 @@ import (
 	"evemaildiscord/config"
 	"evemaildiscord/db"
 	"evemaildiscord/donations"
+	"evemaildiscord/fleet"
 	"evemaildiscord/mail"
 	"evemaildiscord/roles"
 	"evemaildiscord/web"
@@ -96,6 +97,7 @@ func main() {
 
 	go roles.PollRoles(dg)
 	go roles.PollGuestRoles(dg)
+	go fleet.PollAutoInvite(dg)
 
 	go web.StartServer(dg)
 
