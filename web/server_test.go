@@ -126,6 +126,19 @@ func TestHandleEveLogin_CharacterMode(t *testing.T) {
 		t.Fatalf("expected saved state with mode=character for guild_100, got %+v", data)
 	}
 
+	// Character mode must request fleet-feature scopes only.
+	scope := u.Query().Get("scope")
+	for _, want := range []string{"esi-fleets.read_fleet.v1", "esi-fleets.write_fleet.v1", "esi-location.read_location.v1", "publicData"} {
+		if !strings.Contains(scope, want) {
+			t.Errorf("expected scope %s in %q", want, scope)
+		}
+	}
+	for _, notWant := range []string{"esi-mail", "esi-wallet", "read_contacts", "read_standings"} {
+		if strings.Contains(scope, notWant) {
+			t.Errorf("unexpected admin scope %s in %q", notWant, scope)
+		}
+	}
+
 	// Guild mode still requires a session (redirects to landing when absent).
 	reqNoSession := httptest.NewRequest("GET", "/auth/eve/login?guild_id=guild_100", nil)
 	wNoSession := httptest.NewRecorder()

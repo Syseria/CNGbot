@@ -437,6 +437,16 @@ func (h *WebHandler) HandleEveLogin(w http.ResponseWriter, r *http.Request) {
 		"esi-location.read_location.v1",
 		"publicData",
 	}
+	if mode == "character" {
+		// The /link flow only powers auto fleet invite: fleet + location scopes,
+		// none of the admin mail/contacts/standings/wallet scopes.
+		scopes = []string{
+			"publicData",
+			"esi-fleets.read_fleet.v1",
+			"esi-fleets.write_fleet.v1",
+			"esi-location.read_location.v1",
+		}
+	}
 
 	callbackURL := config.GetEveCallbackURL()
 	authURL := fmt.Sprintf(
