@@ -52,7 +52,7 @@ type systemInfo struct {
 }
 
 func formatConnection(trackedName string, sys systemInfo) string {
-	return fmt.Sprintf("New connection to %s\n%s [%s](https://zkillboard.com/system/%d/)",
+	return fmt.Sprintf("New connection to %s ⇢ %s [%s](https://zkillboard.com/system/%d/)",
 		trackedName, systemDetail(sys.SystemClass, sys.Security, sys.ClassTitle), sys.Name, sys.ID)
 }
 
