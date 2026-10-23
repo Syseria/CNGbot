@@ -19,14 +19,14 @@ func TestSystemCategory(t *testing.T) {
 func TestFormatConnection(t *testing.T) {
 	wh := systemInfo{ID: 31001234, Name: "J100809", SystemClass: 3, Security: "-1.0", ClassTitle: "C3"}
 	got := formatConnection("J111011", wh)
-	want := "New connection to **J111011**\n**C3** J100809 - [zkillboard link](https://zkillboard.com/system/31001234/)"
+	want := "New connection to J111011\nC3 [J100809](https://anoik.is/systems/J100809) - [zkillboard link](https://zkillboard.com/system/31001234/)"
 	if got != want {
 		t.Fatalf("wormhole message mismatch:\n got: %s\nwant: %s", got, want)
 	}
 
 	hs := systemInfo{ID: 30000142, Name: "Amarr", SystemClass: 7, Security: "1.0", ClassTitle: "High-sec"}
 	got = formatConnection("J111011", hs)
-	want = "New connection to **J111011**\n**1.0** Amarr - [zkillboard link](https://zkillboard.com/system/30000142/)"
+	want = "New connection to J111011\n1.0 [Amarr](https://evemaps.dotlan.net/system/Amarr) - [zkillboard link](https://zkillboard.com/system/30000142/)"
 	if got != want {
 		t.Fatalf("k-space line mismatch:\n got: %s\nwant: %s", got, want)
 	}
