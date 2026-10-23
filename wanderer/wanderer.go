@@ -51,18 +51,9 @@ type systemInfo struct {
 	ClassTitle  string
 }
 
-// systemLink returns the info page for a system: anoik.is for wormhole
-// (J-space) systems, dotlan for k-space.
-func systemLink(sys systemInfo) string {
-	if SystemCategory(sys.SystemClass) == "WH" {
-		return fmt.Sprintf("https://anoik.is/systems/%s", sys.Name)
-	}
-	return fmt.Sprintf("https://evemaps.dotlan.net/system/%s", sys.Name)
-}
-
 func formatConnection(trackedName string, sys systemInfo) string {
-	return fmt.Sprintf("New connection to %s\n%s [%s](%s) - [zkillboard link](https://zkillboard.com/system/%d/)",
-		trackedName, systemDetail(sys.SystemClass, sys.Security, sys.ClassTitle), sys.Name, systemLink(sys), sys.ID)
+	return fmt.Sprintf("New connection to %s\n%s [%s](https://zkillboard.com/system/%d/)",
+		trackedName, systemDetail(sys.SystemClass, sys.Security, sys.ClassTitle), sys.Name, sys.ID)
 }
 
 // ValidateDSN opens and pings a Postgres database so bad connection strings
