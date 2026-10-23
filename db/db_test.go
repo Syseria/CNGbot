@@ -482,3 +482,49 @@ func TestWandererTrackedAndState(t *testing.T) {
 		t.Fatalf("expected empty dsn after clear, got %q (err: %v)", dsn, err)
 	}
 }
+
+func TestWandererSeenPairs(t *testing.T) {
+	tmpDir := t.TempDir()
+	database, err := sql.Open("sqlite3", filepath.Join(tmpDir, "test_seen_pairs.db"))
+	if err != nil {
+		t.Fatalf("failed to open sqlite: %v", err)
+	}
+	defer database.Close()
+
+	if err := createOrMigrateTables(database); err != nil {
+		t.Fatalf("createOrMigrateTables failed: %v", err)
+	}
+
+	oldDB := DB
+	DB = database
+	defer func() { DB = oldDB }()
+
+	seen, err := IsWandererPairSeen("g1", 100, 200)
+	if err != nil || seen {
+		t.Fatalf("expected unseen pair, got %v (err: %v)", seen, err)
+	}
+
+	if err := MarkWandererPairSeen("g1", 100, 200); err != nil {
+		t.Fatalf("failed to mark pair: %v", err)
+	}
+	if err := MarkWandererPairSeen("g1", 100, 200); err != nil {
+		t.Fatalf("duplicate mark errored: %v", err)
+	}
+
+	// reversed order must hit the same normalized pair
+	seen, err = IsWandererPairSeen("g1", 200, 100)
+	if err != nil || !seen {
+		t.Fatalf("expected normalized pair hit, got %v (err: %v)", seen, err)
+	}
+
+	// other pairs and guilds are unaffected
+	if seen, err := IsWandererPairSeen("g1", 300, 400); err != nil || seen {
+		t.Fatalf("expected different pair unseen, got %v (err: %v)", seen, err)
+	}
+	if err := MarkWandererPairSeen("g2", 100, 200); err != nil {
+		t.Fatalf("failed to mark pair for g2: %v", err)
+	}
+	if seen, err := IsWandererPairSeen("g1", 100, 200); err != nil || !seen {
+		t.Fatalf("expected g1 pair still seen, got %v (err: %v)", seen, err)
+	}
+}

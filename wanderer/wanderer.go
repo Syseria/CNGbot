@@ -228,6 +228,16 @@ func checkGuild(dg *discordgo.Session, guildID string, ids []int64) {
 			maxSeen = insertedAt
 		}
 
+		// announce each connection pair only once per guild: downtime re-adds
+		// create new rows for the same pair and must not re-announce
+		pairSeen, err := db.IsWandererPairSeen(guildID, srcID, dstID)
+		if err != nil {
+			log.Printf("wanderer: checking seen pair for guild %s: %v", guildID, err)
+		}
+		if pairSeen {
+			continue
+		}
+
 		var trackedName string
 		var far systemInfo
 		switch {
@@ -245,6 +255,11 @@ func checkGuild(dg *discordgo.Session, guildID string, ids []int64) {
 			continue
 		}
 		seen[far.ID] = true
+
+		if err := db.MarkWandererPairSeen(guildID, srcID, dstID); err != nil {
+			log.Printf("wanderer: marking pair seen for guild %s: %v", guildID, err)
+		}
+		log.Printf("wanderer: guild %s: connection %s <-> %s (inserted_at %s)", guildID, srcName, dstName, insertedAt.Format(time.RFC3339))
 
 		if _, err := dg.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
 			Content: formatConnection(trackedName, far),

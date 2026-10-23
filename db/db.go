@@ -213,6 +213,11 @@ func createOrMigrateTables(database *sql.DB) error {
 			schema:    "CREATE TABLE wanderer_state (guild_id TEXT NOT NULL DEFAULT '', last_seen TEXT NOT NULL, PRIMARY KEY (guild_id));",
 			colSelect: "last_seen",
 		},
+		{
+			name:      "wanderer_seen_pairs",
+			schema:    "CREATE TABLE wanderer_seen_pairs (guild_id TEXT NOT NULL DEFAULT '', src_id TEXT NOT NULL, dst_id TEXT NOT NULL, PRIMARY KEY (guild_id, src_id, dst_id));",
+			colSelect: "src_id, dst_id",
+		},
 	}
 
 	for _, t := range guildTables {
@@ -655,6 +660,38 @@ func GetGuildWandererDSN(guildID string) (string, error) {
 		return "", nil
 	}
 	return dsn, err
+}
+
+// IsWandererPairSeen reports whether a connection between two systems was
+// already announced for a guild. Endpoints are normalized so (A,B) == (B,A).
+func IsWandererPairSeen(guildID string, srcID, dstID int64) (bool, error) {
+	if DB == nil {
+		return false, fmt.Errorf("database not initialized")
+	}
+	if srcID > dstID {
+		srcID, dstID = dstID, srcID
+	}
+	var one int
+	err := DB.QueryRow("SELECT 1 FROM wanderer_seen_pairs WHERE guild_id = ? AND src_id = ? AND dst_id = ?", guildID, srcID, dstID).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// MarkWandererPairSeen records a connection pair as announced for a guild.
+func MarkWandererPairSeen(guildID string, srcID, dstID int64) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	if srcID > dstID {
+		srcID, dstID = dstID, srcID
+	}
+	_, err := DB.Exec("INSERT OR IGNORE INTO wanderer_seen_pairs (guild_id, src_id, dst_id) VALUES (?, ?, ?)", guildID, srcID, dstID)
+	return err
 }
 
 // GetFleetLastInvite returns the unix timestamp of the last auto fleet invite
