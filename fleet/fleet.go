@@ -26,7 +26,9 @@ var (
 )
 
 const (
-	pollInterval   = 60 * time.Second
+	// 30s poll keeps login-to-invite latency well under a minute; the ESI
+	// load stays modest (a handful of calls per linked character per cycle).
+	pollInterval   = 30 * time.Second
 	inviteCooldown = 1 * time.Minute
 	warnInterval   = 10 * time.Minute
 )
