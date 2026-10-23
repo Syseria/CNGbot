@@ -55,6 +55,9 @@ func TestApplicationCommandsDefinitions(t *testing.T) {
 		"donations_leaderboard":           true,
 		"post_donations_leaderboard":      true,
 		"import_donations":                true,
+		"channel_wanderer":                true,
+		"wanderer_track":                  true,
+		"wanderer_untrack":                true,
 	}
 
 	if len(Commands) != len(expectedCommands) {
@@ -228,6 +231,28 @@ func TestResolveDiscordID(t *testing.T) {
 				t.Errorf("expected formatted %q, got %q", tt.expectedFmt, formatted)
 			}
 		})
+	}
+}
+
+func TestWandererCommandsOptions(t *testing.T) {
+	byName := make(map[string]*discordgo.ApplicationCommand)
+	for _, cmd := range Commands {
+		byName[cmd.Name] = cmd
+	}
+
+	cw := byName["channel_wanderer"]
+	if cw == nil || len(cw.Options) != 1 || cw.Options[0].Type != discordgo.ApplicationCommandOptionChannel || !cw.Options[0].Required {
+		t.Fatalf("channel_wanderer options wrong: %+v", cw)
+	}
+
+	for _, name := range []string{"wanderer_track", "wanderer_untrack"} {
+		cmd := byName[name]
+		if cmd == nil || len(cmd.Options) != 1 || cmd.Options[0].Type != discordgo.ApplicationCommandOptionString || !cmd.Options[0].Required {
+			t.Fatalf("%s options wrong: %+v", name, cmd)
+		}
+		if cmd.Options[0].Name != "system" {
+			t.Fatalf("%s option name = %q, want system", name, cmd.Options[0].Name)
+		}
 	}
 }
 

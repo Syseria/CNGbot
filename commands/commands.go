@@ -19,6 +19,7 @@ import (
 	"evemaildiscord/donations"
 	"evemaildiscord/esi"
 	"evemaildiscord/roles"
+	"evemaildiscord/wanderer"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -311,6 +312,46 @@ var Commands = []*discordgo.ApplicationCommand{
 					discordgo.ChannelTypeGuildText,
 					discordgo.ChannelTypeGuildNews,
 				},
+			},
+		},
+	},
+	{
+		Name:        "channel_wanderer",
+		Description: "Set the channel where new wanderer wormhole connections will be posted",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionChannel,
+				Name:        "channel",
+				Description: "The Discord channel for wanderer connection notifications",
+				Required:    true,
+				ChannelTypes: []discordgo.ChannelType{
+					discordgo.ChannelTypeGuildText,
+					discordgo.ChannelTypeGuildNews,
+				},
+			},
+		},
+	},
+	{
+		Name:        "wanderer_track",
+		Description: "Track a J-space system to be notified when a new system connects to it",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "system",
+				Description: "System name, e.g. J111011",
+				Required:    true,
+			},
+		},
+	},
+	{
+		Name:        "wanderer_untrack",
+		Description: "Stop tracking a wanderer system",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "system",
+				Description: "System name, e.g. J111011",
+				Required:    true,
 			},
 		},
 	},
@@ -1802,6 +1843,9 @@ func InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			"`/donations_leaderboard` - Displays the top 50 donors of all time to the tracked corporations.\n" +
 			"`/post_donations_leaderboard` - Posts the leaderboard to the configured donations channel.\n" +
 			"`/import_donations [data] [file] [role]` - Import pasted corporation wallet journal data to backfill donation history.\n" +
+			"`/channel_wanderer <channel>` - Set the channel where new wanderer wormhole connections will be posted.\n" +
+			"`/wanderer_track <system>` - Track a J-space system (e.g. J111011) to be notified when a new system connects to it.\n" +
+			"`/wanderer_untrack <system>` - Stop tracking a wanderer system.\n" +
 			"`/id <target>` - Output the Discord ID and mention format for a user, channel, role, or emoji.\n" +
 			"`/courier_fee [volume] [jumps] [estimated price]` - Calculates the fee for a courier contract.\n\n" +
 			"__Debug__\n" +
@@ -2178,6 +2222,91 @@ func InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				return err
 			}
 			sendResponse(s, i.Interaction, fmt.Sprintf("EVE mail channel updated to <#%s>. Newly received EVE mails will be posted here.", chanID))
+			return nil
+		})
+
+	case "channel_wanderer":
+		chanOpt := getOption(data.Options, "channel")
+		var chanID string
+		if chanOpt != nil {
+			if ch := chanOpt.ChannelValue(s); ch != nil {
+				chanID = ch.ID
+			} else if str, ok := chanOpt.Value.(string); ok {
+				chanID = str
+			}
+		}
+		if chanID == "" {
+			sendResponse(s, i.Interaction, "Could not resolve the channel. Please try again.")
+			return
+		}
+		db.ExecuteOrQueue(s, i.ChannelID, func() error {
+			_, err := db.DB.Exec("INSERT OR REPLACE INTO config (guild_id, key, value) VALUES (?, 'wanderer_channel', ?)", guildID, chanID)
+			if err != nil {
+				return err
+			}
+			sendResponse(s, i.Interaction, fmt.Sprintf("Wanderer connection notifications will be posted to <#%s>.", chanID))
+			return nil
+		})
+
+	case "wanderer_track":
+		sysOpt := getOption(data.Options, "system")
+		if sysOpt == nil {
+			sendResponse(s, i.Interaction, "Usage: /wanderer_track system:J111011")
+			return
+		}
+		systemName := strings.TrimSpace(sysOpt.StringValue())
+		if systemName == "" {
+			sendResponse(s, i.Interaction, "Usage: /wanderer_track system:J111011")
+			return
+		}
+		dsn, err := db.GetGuildWandererDSN(guildID)
+		if err != nil || dsn == "" {
+			sendResponse(s, i.Interaction, "No wanderer database configured. Set the connection string on the dashboard (Wanderer Integration) first.")
+			return
+		}
+		systemID, displayName, err := wanderer.LookupSystem(dsn, systemName)
+		if err != nil {
+			sendResponse(s, i.Interaction, err.Error())
+			return
+		}
+		existing, err := db.GetWandererTrackedByName(guildID, displayName)
+		if err != nil {
+			sendResponse(s, i.Interaction, "Error checking tracked systems.")
+			return
+		}
+		if existing != nil {
+			sendResponse(s, i.Interaction, fmt.Sprintf("%s is already being tracked.", displayName))
+			return
+		}
+		db.ExecuteOrQueue(s, i.ChannelID, func() error {
+			if err := db.AddWandererTrackedSystem(guildID, systemID, displayName); err != nil {
+				return err
+			}
+			sendResponse(s, i.Interaction, fmt.Sprintf("Now tracking **%s**. You will be notified when a new system connects to it.", displayName))
+			return nil
+		})
+
+	case "wanderer_untrack":
+		sysOpt := getOption(data.Options, "system")
+		if sysOpt == nil {
+			sendResponse(s, i.Interaction, "Usage: /wanderer_untrack system:J111011")
+			return
+		}
+		systemName := strings.TrimSpace(sysOpt.StringValue())
+		existing, err := db.GetWandererTrackedByName(guildID, systemName)
+		if err != nil {
+			sendResponse(s, i.Interaction, "Error looking up tracked systems.")
+			return
+		}
+		if existing == nil {
+			sendResponse(s, i.Interaction, fmt.Sprintf("%s is not being tracked.", systemName))
+			return
+		}
+		db.ExecuteOrQueue(s, i.ChannelID, func() error {
+			if err := db.RemoveWandererTrackedSystem(guildID, existing.SolarSystemID); err != nil {
+				return err
+			}
+			sendResponse(s, i.Interaction, fmt.Sprintf("Stopped tracking **%s**.", existing.SystemName))
 			return nil
 		})
 

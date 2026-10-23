@@ -32,6 +32,9 @@ Here is a full list of all available commands for the CNG Bot and what they do.
 * `/donations_leaderboard`: Display the top 50 donors of all time to the tracked corporations.
 * `/post_donations_leaderboard`: Post the leaderboard to the configured donations channel.
 * `/import_donations`: Import pasted corporation wallet journal data to backfill donation history.
+* `/channel_wanderer`: Set the channel where notifications about new wanderer wormhole connections will be posted.
+* `/wanderer_track`: Track a J-space system (e.g. J111011) so the bot posts when a new system connects to it in your wanderer maps.
+* `/wanderer_untrack`: Stop tracking a wanderer system.
 * `/toggle_logs`: Toggle posting role addition and removal logs to the designated channel.
 * `/toggle_automap`: Toggle automatic character mapping of new server members on join.
 * `/toggle_auto_fleet_invite`: Toggle auto-inviting linked alliance members in wormhole space into the fleet of a linked fleet boss. Members must run `/link` so the bot can check their location and invite them; the boss's ESI token must include the esi-fleets scopes (via `/link` or dashboard re-link).
