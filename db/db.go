@@ -203,6 +203,16 @@ func createOrMigrateTables(database *sql.DB) error {
 			schema:    "CREATE TABLE alliance_required_corp_roles (guild_id TEXT NOT NULL DEFAULT '', role_id TEXT NOT NULL, PRIMARY KEY (guild_id, role_id));",
 			colSelect: "role_id",
 		},
+		{
+			name:      "wanderer_tracked",
+			schema:    "CREATE TABLE wanderer_tracked (guild_id TEXT NOT NULL DEFAULT '', solar_system_id TEXT NOT NULL, system_name TEXT NOT NULL, PRIMARY KEY (guild_id, solar_system_id));",
+			colSelect: "solar_system_id, system_name",
+		},
+		{
+			name:      "wanderer_state",
+			schema:    "CREATE TABLE wanderer_state (guild_id TEXT NOT NULL DEFAULT '', last_seen TEXT NOT NULL, PRIMARY KEY (guild_id));",
+			colSelect: "last_seen",
+		},
 	}
 
 	for _, t := range guildTables {
@@ -535,6 +545,116 @@ func SetMailState(guildID string, lastMailID int) error {
 			last_mail_id = excluded.last_mail_id
 	`, guildID, lastMailID)
 	return err
+}
+
+// Wanderer tracking
+
+type WandererTrackedSystem struct {
+	GuildID       string
+	SolarSystemID int64
+	SystemName    string
+}
+
+func AddWandererTrackedSystem(guildID string, solarSystemID int64, systemName string) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	_, err := DB.Exec("INSERT INTO wanderer_tracked (guild_id, solar_system_id, system_name) VALUES (?, ?, ?) ON CONFLICT(guild_id, solar_system_id) DO NOTHING", guildID, solarSystemID, systemName)
+	return err
+}
+
+func GetWandererTrackedByName(guildID, systemName string) (*WandererTrackedSystem, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+	var ts WandererTrackedSystem
+	err := DB.QueryRow("SELECT guild_id, solar_system_id, system_name FROM wanderer_tracked WHERE guild_id = ? AND lower(system_name) = lower(?)", guildID, systemName).Scan(&ts.GuildID, &ts.SolarSystemID, &ts.SystemName)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &ts, nil
+}
+
+func RemoveWandererTrackedSystem(guildID string, solarSystemID int64) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	_, err := DB.Exec("DELETE FROM wanderer_tracked WHERE guild_id = ? AND solar_system_id = ?", guildID, solarSystemID)
+	return err
+}
+
+func ListWandererTrackedSystems() ([]WandererTrackedSystem, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+	rows, err := DB.Query("SELECT guild_id, solar_system_id, system_name FROM wanderer_tracked")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []WandererTrackedSystem
+	for rows.Next() {
+		var ts WandererTrackedSystem
+		if err := rows.Scan(&ts.GuildID, &ts.SolarSystemID, &ts.SystemName); err != nil {
+			return nil, err
+		}
+		out = append(out, ts)
+	}
+	return out, rows.Err()
+}
+
+func GetWandererState(guildID string) (time.Time, bool, error) {
+	if DB == nil {
+		return time.Time{}, false, fmt.Errorf("database not initialized")
+	}
+	var raw string
+	err := DB.QueryRow("SELECT last_seen FROM wanderer_state WHERE guild_id = ?", guildID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	t, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return t, true, nil
+}
+
+func SetWandererState(guildID string, t time.Time) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	_, err := DB.Exec("INSERT INTO wanderer_state (guild_id, last_seen) VALUES (?, ?) ON CONFLICT(guild_id) DO UPDATE SET last_seen = excluded.last_seen", guildID, t.UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+func SetGuildWandererDSN(guildID, dsn string) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	if dsn == "" {
+		_, err := DB.Exec("DELETE FROM config WHERE guild_id = ? AND key = 'wanderer_dsn'", guildID)
+		return err
+	}
+	_, err := DB.Exec("INSERT OR REPLACE INTO config (guild_id, key, value) VALUES (?, 'wanderer_dsn', ?)", guildID, dsn)
+	return err
+}
+
+func GetGuildWandererDSN(guildID string) (string, error) {
+	if DB == nil {
+		return "", fmt.Errorf("database not initialized")
+	}
+	var dsn string
+	err := DB.QueryRow("SELECT value FROM config WHERE guild_id = ? AND key = 'wanderer_dsn'", guildID).Scan(&dsn)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return dsn, err
 }
 
 // GetFleetLastInvite returns the unix timestamp of the last auto fleet invite

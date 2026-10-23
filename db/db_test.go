@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -401,3 +402,83 @@ func TestDonationsDatabase(t *testing.T) {
 	}
 }
 
+func TestWandererTrackedAndState(t *testing.T) {
+	tmpDir := t.TempDir()
+	database, err := sql.Open("sqlite3", filepath.Join(tmpDir, "test_wanderer.db"))
+	if err != nil {
+		t.Fatalf("failed to open sqlite: %v", err)
+	}
+	defer database.Close()
+
+	if err := createOrMigrateTables(database); err != nil {
+		t.Fatalf("createOrMigrateTables failed: %v", err)
+	}
+
+	oldDB := DB
+	DB = database
+	defer func() { DB = oldDB }()
+
+	// Tracked systems CRUD
+	found, err := GetWandererTrackedByName("g1", "J111011")
+	if err != nil || found != nil {
+		t.Fatalf("expected no tracked system, got %+v (err: %v)", found, err)
+	}
+
+	if err := AddWandererTrackedSystem("g1", 31001234, "J111011"); err != nil {
+		t.Fatalf("failed to add tracked system: %v", err)
+	}
+	// duplicate insert must be a no-op (PK guild_id+solar_system_id)
+	if err := AddWandererTrackedSystem("g1", 31001234, "J111011"); err != nil {
+		t.Fatalf("duplicate insert errored: %v", err)
+	}
+	if err := AddWandererTrackedSystem("g2", 31009999, "J100809"); err != nil {
+		t.Fatalf("failed to add tracked system: %v", err)
+	}
+
+	all, err := ListWandererTrackedSystems()
+	if err != nil || len(all) != 2 {
+		t.Fatalf("expected 2 tracked systems, got %d (err: %v)", len(all), err)
+	}
+
+	// case-insensitive lookup by name
+	found, err = GetWandererTrackedByName("g1", "j111011")
+	if err != nil || found == nil || found.SolarSystemID != 31001234 {
+		t.Fatalf("expected case-insensitive lookup hit, got %+v (err: %v)", found, err)
+	}
+
+	if err := RemoveWandererTrackedSystem("g1", 31001234); err != nil {
+		t.Fatalf("failed to remove tracked system: %v", err)
+	}
+	all, err = ListWandererTrackedSystems()
+	if err != nil || len(all) != 1 {
+		t.Fatalf("expected 1 tracked system after remove, got %d (err: %v)", len(all), err)
+	}
+
+	// Poll state
+	if _, ok, err := GetWandererState("g1"); ok || err != nil {
+		t.Fatalf("expected no state, got ok=%v (err: %v)", ok, err)
+	}
+	now := time.Now().UTC()
+	if err := SetWandererState("g1", now); err != nil {
+		t.Fatalf("failed to set state: %v", err)
+	}
+	got, ok, err := GetWandererState("g1")
+	if err != nil || !ok || got.Sub(now) > time.Minute || now.Sub(got) > time.Minute {
+		t.Fatalf("state mismatch: ok=%v got=%v want~%v (err: %v)", ok, got, now, err)
+	}
+
+	// DSN config
+	if err := SetGuildWandererDSN("g1", "postgres://user:pass@host:5432/wanderer"); err != nil {
+		t.Fatalf("failed to set dsn: %v", err)
+	}
+	dsn, err := GetGuildWandererDSN("g1")
+	if err != nil || dsn != "postgres://user:pass@host:5432/wanderer" {
+		t.Fatalf("dsn mismatch: %q (err: %v)", dsn, err)
+	}
+	if err := SetGuildWandererDSN("g1", ""); err != nil {
+		t.Fatalf("failed to clear dsn: %v", err)
+	}
+	if dsn, err := GetGuildWandererDSN("g1"); err != nil || dsn != "" {
+		t.Fatalf("expected empty dsn after clear, got %q (err: %v)", dsn, err)
+	}
+}
