@@ -148,10 +148,23 @@ func checkGuild(dg *discordgo.Session, guildID string, ids []int64) {
 		log.Printf("wanderer: reading state for guild %s: %v", guildID, err)
 		return
 	}
-	now := time.Now().UTC()
 	if !ok {
-		// baseline only: don't flood the channel with pre-existing connections
-		if err := db.SetWandererState(guildID, now); err != nil {
+		// baseline only: don't flood the channel with pre-existing connections;
+		// baseline from the DB's clock so lastSeen lines up with inserted_at
+		pool, err := sql.Open("pgx", dsn)
+		if err != nil {
+			log.Printf("wanderer: opening database for guild %s: %v", guildID, err)
+			return
+		}
+		defer pool.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var baseline time.Time
+		if err := pool.QueryRowContext(ctx, "SELECT COALESCE(MAX(inserted_at), now()) FROM map_chain_v1").Scan(&baseline); err != nil {
+			log.Printf("wanderer: reading max inserted_at for guild %s: %v", guildID, err)
+			baseline = time.Now().UTC()
+		}
+		if err := db.SetWandererState(guildID, baseline); err != nil {
 			log.Printf("wanderer: setting state for guild %s: %v", guildID, err)
 		}
 		return
