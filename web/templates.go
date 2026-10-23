@@ -48,6 +48,7 @@ type GuildConfigData struct {
 		TwoFA         string
 		AutoMap       string
 		SyncRoles     string
+		WandererDSN   string
 	}
 	Success string
 	Error   string

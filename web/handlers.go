@@ -17,6 +17,7 @@ import (
 	"evemaildiscord/db"
 	"evemaildiscord/donations"
 	"evemaildiscord/esi"
+	"evemaildiscord/wanderer"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -343,6 +344,7 @@ func (h *WebHandler) HandleGuildConfig(w http.ResponseWriter, r *http.Request) {
 		TwoFA         string
 		AutoMap       string
 		SyncRoles     string
+		WandererDSN   string
 	}
 
 	if db.DB != nil {
@@ -353,6 +355,7 @@ func (h *WebHandler) HandleGuildConfig(w http.ResponseWriter, r *http.Request) {
 		_ = db.DB.QueryRow("SELECT value FROM config WHERE guild_id = ? AND key = 'enable_2fa'", guildID).Scan(&confData.TwoFA)
 		_ = db.DB.QueryRow("SELECT value FROM config WHERE guild_id = ? AND key = 'auto_map_chars'", guildID).Scan(&confData.AutoMap)
 		_ = db.DB.QueryRow("SELECT value FROM config WHERE guild_id = ? AND key = 'sync_roles'", guildID).Scan(&confData.SyncRoles)
+		_ = db.DB.QueryRow("SELECT value FROM config WHERE guild_id = ? AND key = 'wanderer_dsn'", guildID).Scan(&confData.WandererDSN)
 	}
 
 	var trackedCorps []TrackedCorpView
@@ -688,6 +691,52 @@ func (h *WebHandler) HandleGuildSeatSave(w http.ResponseWriter, r *http.Request)
 	}
 
 	http.Redirect(w, r, "/dashboard/guild?id="+guildID+"&success=seat_saved", http.StatusSeeOther)
+}
+
+func (h *WebHandler) HandleGuildWandererSave(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	session := Store.GetSession(r)
+	if session == nil {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	_ = r.ParseForm()
+	guildID := r.FormValue("guild_id")
+	if guildID == "" {
+		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+		return
+	}
+
+	if _, ok := session.AdminGuilds[guildID]; !ok {
+		http.Error(w, "You do not have Administrator permissions for this server", http.StatusForbidden)
+		return
+	}
+
+	dsn := strings.TrimSpace(r.FormValue("wanderer_dsn"))
+	if dsn != "" {
+		if err := wanderer.ValidateDSN(dsn); err != nil {
+			log.Printf("wanderer DSN validation failed for guild %s: %v", guildID, err)
+			http.Redirect(w, r, "/dashboard/guild?id="+guildID+"&error=Could+not+connect+to+the+wanderer+database+with+that+connection+string", http.StatusSeeOther)
+			return
+		}
+	}
+
+	if err := db.SetGuildWandererDSN(guildID, dsn); err != nil {
+		log.Printf("Error saving wanderer config for guild %s: %v", guildID, err)
+		http.Redirect(w, r, "/dashboard/guild?id="+guildID+"&error=Failed+to+save+wanderer+settings", http.StatusSeeOther)
+		return
+	}
+
+	if h.dg != nil {
+		db.DiscordLog(h.dg, guildID, fmt.Sprintf("Wanderer database configuration updated by <@%s>.", session.UserID))
+	}
+
+	http.Redirect(w, r, "/dashboard/guild?id="+guildID+"&success=wanderer_saved", http.StatusSeeOther)
 }
 
 func (h *WebHandler) HandleGuildAutomationSave(w http.ResponseWriter, r *http.Request) {

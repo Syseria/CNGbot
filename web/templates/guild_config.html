@@ -44,6 +44,8 @@
 			<div class="bg-green-900/30 text-green-400 border border-green-800/50 p-4 rounded-md mb-6 font-medium">✓ EVE Online integration has been unlinked from this server.</div>
 		{{else if eq .Success "seat_saved"}}
 			<div class="bg-green-900/30 text-green-400 border border-green-800/50 p-4 rounded-md mb-6 font-medium">✓ SeAT API configuration saved successfully!</div>
+		{{else if eq .Success "wanderer_saved"}}
+			<div class="bg-green-900/30 text-green-400 border border-green-800/50 p-4 rounded-md mb-6 font-medium">✓ Wanderer settings saved successfully!</div>
 		{{else if eq .Success "donations_imported"}}
 			<div class="bg-green-900/30 text-green-400 border border-green-800/50 p-4 rounded-md mb-6 font-medium">✓ Historical donations imported successfully! Duplicate entries were safely detected and skipped. Use /donations_leaderboard in Discord to view updated standings.</div>
 		{{else if eq .Success "1"}}
@@ -135,6 +137,34 @@
 				</div>
 
 				<button type="submit" class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-6 rounded-md transition duration-200 ease-in-out shadow-sm">Save SeAT Settings</button>
+			</form>
+		</div>
+
+		<!-- Wanderer Integration -->
+		<div class="bg-gray-800 border border-gray-700 rounded-lg p-5 md:p-6 mb-6 shadow-md">
+			<div class="flex flex-col md:flex-row justify-between md:items-start gap-4 mb-4">
+				<div>
+					<h2 class="text-xl font-bold text-white">Wanderer Integration (Optional)</h2>
+					<p class="text-gray-400 mt-1 text-sm md:text-base">Post notifications when new solar systems connect to tracked J-space systems on your wanderer maps. Configure with the /channel_wanderer and /wanderer_track commands.</p>
+				</div>
+				<div class="shrink-0">
+					{{if .Config.WandererDSN}}
+						<span class="inline-block px-2 py-1 text-xs font-semibold rounded bg-green-900/30 text-green-400 border border-green-800/50 uppercase tracking-wide">Configured</span>
+					{{else}}
+						<span class="inline-block px-2 py-1 text-xs font-semibold rounded bg-yellow-900/30 text-yellow-500 border border-yellow-800/50 uppercase tracking-wide">Optional</span>
+					{{end}}
+				</div>
+			</div>
+
+			<form action="/dashboard/guild/wanderer" method="POST" class="mt-4">
+				<input type="hidden" name="guild_id" value="{{.Guild.ID}}">
+				<div class="mb-5">
+					<label for="wanderer_dsn" class="block font-semibold mb-2 text-white text-sm">Wanderer PostgreSQL Connection String</label>
+					<input type="password" id="wanderer_dsn" name="wanderer_dsn" class="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-md text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors" placeholder="postgres://user:password@host:5432/wanderer" value="{{.Config.WandererDSN}}">
+					<p class="text-gray-500 text-xs mt-1">The bot queries the wanderer database directly to detect new map connections. Save empty to remove.</p>
+				</div>
+
+				<button type="submit" class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-6 rounded-md transition duration-200 ease-in-out shadow-sm">Save Wanderer Settings</button>
 			</form>
 		</div>
 
