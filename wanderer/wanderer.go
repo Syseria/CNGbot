@@ -51,10 +51,9 @@ type systemInfo struct {
 	ClassTitle  string
 }
 
-func formatConnection(fromName, mapName string, sys systemInfo) string {
-	return fmt.Sprintf("**%s** — %s (%s) — connected from %s on map %q — https://zkillboard.com/system/%d/",
-		sys.Name, SystemCategory(sys.SystemClass), systemDetail(sys.SystemClass, sys.Security, sys.ClassTitle),
-		fromName, mapName, sys.ID)
+func formatConnection(trackedName string, sys systemInfo) string {
+	return fmt.Sprintf("New connection to **%s**\n**%s** %s - [zkillboard link](https://zkillboard.com/system/%d/)",
+		trackedName, systemDetail(sys.SystemClass, sys.Security, sys.ClassTitle), sys.Name, sys.ID)
 }
 
 // ValidateDSN opens and pings a Postgres database so bad connection strings
@@ -185,7 +184,7 @@ func checkGuild(dg *discordgo.Session, guildID string, ids []int64) {
 	defer cancel()
 
 	rows, err := pool.QueryContext(ctx, `
-		SELECT c.solar_system_source, c.solar_system_target, m.name,
+		SELECT c.solar_system_source, c.solar_system_target,
 		       src.solar_system_name, src.system_class, src.security, src.class_title,
 		       dst.solar_system_name, dst.system_class, dst.security, dst.class_title,
 		       c.inserted_at
@@ -206,10 +205,10 @@ func checkGuild(dg *discordgo.Session, guildID string, ids []int64) {
 	maxSeen := lastSeen
 	for rows.Next() {
 		var srcID, dstID int64
-		var mapName, srcName, dstName, srcSec, dstSec, srcTitle, dstTitle string
+		var srcName, dstName, srcSec, dstSec, srcTitle, dstTitle string
 		var srcClass, dstClass int
 		var insertedAt time.Time
-		if err := rows.Scan(&srcID, &dstID, &mapName,
+		if err := rows.Scan(&srcID, &dstID,
 			&srcName, &srcClass, &srcSec, &srcTitle,
 			&dstName, &dstClass, &dstSec, &dstTitle,
 			&insertedAt); err != nil {
@@ -220,16 +219,16 @@ func checkGuild(dg *discordgo.Session, guildID string, ids []int64) {
 			maxSeen = insertedAt
 		}
 
-		var from string
+		var trackedName string
 		var far systemInfo
 		switch {
 		case idSet[srcID] && idSet[dstID]:
 			// both endpoints tracked: one notification, report the target side
-			from, far = srcName, systemInfo{ID: dstID, Name: dstName, SystemClass: dstClass, Security: dstSec, ClassTitle: dstTitle}
+			trackedName, far = srcName, systemInfo{ID: dstID, Name: dstName, SystemClass: dstClass, Security: dstSec, ClassTitle: dstTitle}
 		case idSet[srcID]:
-			from, far = srcName, systemInfo{ID: dstID, Name: dstName, SystemClass: dstClass, Security: dstSec, ClassTitle: dstTitle}
+			trackedName, far = srcName, systemInfo{ID: dstID, Name: dstName, SystemClass: dstClass, Security: dstSec, ClassTitle: dstTitle}
 		case idSet[dstID]:
-			from, far = dstName, systemInfo{ID: srcID, Name: srcName, SystemClass: srcClass, Security: srcSec, ClassTitle: srcTitle}
+			trackedName, far = dstName, systemInfo{ID: srcID, Name: srcName, SystemClass: srcClass, Security: srcSec, ClassTitle: srcTitle}
 		default:
 			continue
 		}
@@ -238,7 +237,7 @@ func checkGuild(dg *discordgo.Session, guildID string, ids []int64) {
 		}
 		seen[far.ID] = true
 
-		if _, err := dg.ChannelMessageSend(channelID, formatConnection(from, mapName, far)); err != nil {
+		if _, err := dg.ChannelMessageSend(channelID, formatConnection(trackedName, far)); err != nil {
 			log.Printf("wanderer: posting to channel %s: %v", channelID, err)
 		}
 	}
