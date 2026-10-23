@@ -18,6 +18,7 @@ import (
 	"evemaildiscord/mail"
 	"evemaildiscord/roles"
 	"evemaildiscord/web"
+	"evemaildiscord/wanderer"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -98,6 +99,7 @@ func main() {
 	go roles.PollRoles(dg)
 	go roles.PollGuestRoles(dg)
 	go fleet.PollAutoInvite(dg)
+	go wanderer.PollWanderer(dg)
 
 	go web.StartServer(dg)
 
