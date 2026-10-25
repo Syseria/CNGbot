@@ -50,19 +50,19 @@ func TestRouteSuffix(t *testing.T) {
 		t.Fatalf("unparseable security should have no suffix, got %q", got)
 	}
 
-	if got := routeSuffix(hs, 4, 5); got != " - The Forge - 4 jumps to Jita" {
+	if got := routeSuffix(hs, 4, 5); got != " - The Forge\n4 jumps to Jita" {
 		t.Fatalf("jita closer mismatch: %q", got)
 	}
-	if got := routeSuffix(hs, 4, 2); got != " - The Forge - 2 jumps to Amarr" {
+	if got := routeSuffix(hs, 4, 2); got != " - The Forge\n2 jumps to Amarr" {
 		t.Fatalf("amarr closer mismatch: %q", got)
 	}
-	if got := routeSuffix(hs, -1, 6); got != " - The Forge - 6 jumps to Amarr" {
+	if got := routeSuffix(hs, -1, 6); got != " - The Forge\n6 jumps to Amarr" {
 		t.Fatalf("amarr fallback mismatch: %q", got)
 	}
-	if got := routeSuffix(hs, 3, -1); got != " - The Forge - 3 jumps to Jita" {
+	if got := routeSuffix(hs, 3, -1); got != " - The Forge\n3 jumps to Jita" {
 		t.Fatalf("jita fallback mismatch: %q", got)
 	}
-	if got := routeSuffix(hs, -1, -1); got != " - The Forge - no safe route to Jita/Amarr" {
+	if got := routeSuffix(hs, -1, -1); got != " - The Forge\nno safe route to Jita/Amarr" {
 		t.Fatalf("no-route mismatch: %q", got)
 	}
 }

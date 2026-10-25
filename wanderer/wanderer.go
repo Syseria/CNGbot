@@ -88,9 +88,9 @@ func routeSuffix(sys systemInfo, jitaJumps, amarrJumps int) string {
 		best, name = amarrJumps, "Amarr"
 	}
 	if best < 0 {
-		return fmt.Sprintf(" - %s - no safe route to Jita/Amarr", sys.Region)
+		return fmt.Sprintf(" - %s\nno safe route to Jita/Amarr", sys.Region)
 	}
-	return fmt.Sprintf(" - %s - %d jumps to %s", sys.Region, best, name)
+	return fmt.Sprintf(" - %s\n%d jumps to %s", sys.Region, best, name)
 }
 
 // secureJumps returns the jump count of an ESI secure route (avoids lowsec),
