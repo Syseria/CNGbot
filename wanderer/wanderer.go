@@ -3,8 +3,12 @@ package wanderer
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,6 +16,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"evemaildiscord/db"
+	"evemaildiscord/esi"
 )
 
 const pollInterval = 2 * time.Minute
@@ -49,11 +54,67 @@ type systemInfo struct {
 	SystemClass int
 	Security    string
 	ClassTitle  string
+	Region      string
 }
 
 func formatConnection(trackedName string, sys systemInfo) string {
 	return fmt.Sprintf("New connection to %s ⇢ %s [%s](https://zkillboard.com/system/%d/)",
 		trackedName, systemDetail(sys.SystemClass, sys.Security, sys.ClassTitle), sys.Name, sys.ID)
+}
+
+const (
+	jitaSystemID  = 30000142
+	amarrSystemID = 30002187
+)
+
+// hsRouteSuffix appends the region and the shortest secure (no lowsec) jump
+// count to Jita or Amarr for highsec systems (security 0.5+). Empty otherwise.
+func hsRouteSuffix(sys systemInfo) string {
+	if sec, err := strconv.ParseFloat(sys.Security, 64); err != nil || sec < 0.5 {
+		return ""
+	}
+	return routeSuffix(sys, secureJumps(sys.ID, jitaSystemID), secureJumps(sys.ID, amarrSystemID))
+}
+
+// routeSuffix picks the closer of Jita/Amarr (-1 = no safe route found) for
+// highsec systems (security 0.5+); empty string for anything else.
+func routeSuffix(sys systemInfo, jitaJumps, amarrJumps int) string {
+	sec, err := strconv.ParseFloat(sys.Security, 64)
+	if err != nil || sec < 0.5 {
+		return ""
+	}
+	best, name := jitaJumps, "Jita"
+	if best < 0 || (amarrJumps >= 0 && amarrJumps < best) {
+		best, name = amarrJumps, "Amarr"
+	}
+	if best < 0 {
+		return fmt.Sprintf(" - %s - no safe route to Jita/Amarr", sys.Region)
+	}
+	return fmt.Sprintf(" - %s - %d jumps to %s", sys.Region, best, name)
+}
+
+// secureJumps returns the jump count of an ESI secure route (avoids lowsec),
+// or -1 when no route exists or ESI is unreachable.
+func secureJumps(origin, dest int64) int {
+	resp, err := esi.Get(fmt.Sprintf("https://esi.evetech.net/latest/route/%d/%d/?flag=secure", origin, dest))
+	if err != nil {
+		log.Printf("wanderer: esi route %d to %d: %v", origin, dest, err)
+		return -1
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("wanderer: esi route %d to %d: reading body: %v", origin, dest, err)
+		return -1
+	}
+	if resp.StatusCode != http.StatusOK {
+		return -1 // 404 = no secure route; other statuses handled the same
+	}
+	var route []int64
+	if err := json.Unmarshal(body, &route); err != nil || len(route) < 2 {
+		return -1
+	}
+	return len(route) - 1
 }
 
 // ValidateDSN opens and pings a Postgres database so bad connection strings
@@ -185,8 +246,8 @@ func checkGuild(dg *discordgo.Session, guildID string, ids []int64) {
 
 	rows, err := pool.QueryContext(ctx, `
 		SELECT c.solar_system_source, c.solar_system_target,
-		       src.solar_system_name, src.system_class, src.security, src.class_title,
-		       dst.solar_system_name, dst.system_class, dst.security, dst.class_title,
+		       src.solar_system_name, src.system_class, src.security, src.class_title, src.region_name,
+		       dst.solar_system_name, dst.system_class, dst.security, dst.class_title, dst.region_name,
 		       c.inserted_at
 		FROM map_chain_v1 c
 		JOIN maps_v1 m ON m.id = c.map_id AND m.deleted = false
@@ -205,12 +266,12 @@ func checkGuild(dg *discordgo.Session, guildID string, ids []int64) {
 	maxSeen := lastSeen
 	for rows.Next() {
 		var srcID, dstID int64
-		var srcName, dstName, srcSec, dstSec, srcTitle, dstTitle string
+		var srcName, dstName, srcSec, dstSec, srcTitle, dstTitle, srcRegion, dstRegion string
 		var srcClass, dstClass int
 		var insertedAt time.Time
 		if err := rows.Scan(&srcID, &dstID,
-			&srcName, &srcClass, &srcSec, &srcTitle,
-			&dstName, &dstClass, &dstSec, &dstTitle,
+			&srcName, &srcClass, &srcSec, &srcTitle, &srcRegion,
+			&dstName, &dstClass, &dstSec, &dstTitle, &dstRegion,
 			&insertedAt); err != nil {
 			log.Printf("wanderer: scanning row for guild %s: %v", guildID, err)
 			continue
@@ -234,11 +295,11 @@ func checkGuild(dg *discordgo.Session, guildID string, ids []int64) {
 		switch {
 		case idSet[srcID] && idSet[dstID]:
 			// both endpoints tracked: one notification, report the target side
-			trackedName, far = srcName, systemInfo{ID: dstID, Name: dstName, SystemClass: dstClass, Security: dstSec, ClassTitle: dstTitle}
+			trackedName, far = srcName, systemInfo{ID: dstID, Name: dstName, SystemClass: dstClass, Security: dstSec, ClassTitle: dstTitle, Region: dstRegion}
 		case idSet[srcID]:
-			trackedName, far = srcName, systemInfo{ID: dstID, Name: dstName, SystemClass: dstClass, Security: dstSec, ClassTitle: dstTitle}
+			trackedName, far = srcName, systemInfo{ID: dstID, Name: dstName, SystemClass: dstClass, Security: dstSec, ClassTitle: dstTitle, Region: dstRegion}
 		case idSet[dstID]:
-			trackedName, far = dstName, systemInfo{ID: srcID, Name: srcName, SystemClass: srcClass, Security: srcSec, ClassTitle: srcTitle}
+			trackedName, far = dstName, systemInfo{ID: srcID, Name: srcName, SystemClass: srcClass, Security: srcSec, ClassTitle: srcTitle, Region: srcRegion}
 		default:
 			continue
 		}
@@ -252,8 +313,9 @@ func checkGuild(dg *discordgo.Session, guildID string, ids []int64) {
 		}
 		log.Printf("wanderer: guild %s: connection %s <-> %s (inserted_at %s)", guildID, srcName, dstName, insertedAt.Format(time.RFC3339))
 
+		content := formatConnection(trackedName, far) + hsRouteSuffix(far)
 		if _, err := dg.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
-			Content: formatConnection(trackedName, far),
+			Content: content,
 			Flags:   discordgo.MessageFlagsSuppressEmbeds,
 		}); err != nil {
 			log.Printf("wanderer: posting to channel %s: %v", channelID, err)
