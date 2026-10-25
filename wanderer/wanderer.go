@@ -117,6 +117,54 @@ func secureJumps(origin, dest int64) int {
 	return len(route) - 1
 }
 
+// killsSuffix appends a "X kills in the last 48 hours" line for J-space
+// systems, based on zkillboard. Empty for k-space or when zkill is unreachable.
+func killsSuffix(sys systemInfo) string {
+	if SystemCategory(sys.SystemClass) != "WH" {
+		return ""
+	}
+	n, err := systemKills48h(sys.ID)
+	if err != nil {
+		log.Printf("wanderer: zkill kills for system %d: %v", sys.ID, err)
+		return ""
+	}
+	return fmt.Sprintf("\n%d kills in the last 48 hours", n)
+}
+
+// systemKills48h counts the killmails zkillboard recorded in a system over
+// the last 48 hours. The API no longer supports limit/time filters and caps
+// at the 200 most recent killmails, so for unusually busy systems this is a
+// lower bound.
+func systemKills48h(systemID int64) (int, error) {
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("https://zkillboard.com/api/kills/systemID/%d/", systemID), nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("User-Agent", "CNGBot (https://cngbot.cultofmagik.org)")
+	resp, err := esi.Client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("zkillboard returned status %d", resp.StatusCode)
+	}
+	var kills []struct {
+		KillmailTime time.Time `json:"killmail_time"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&kills); err != nil {
+		return 0, err
+	}
+	cutoff := time.Now().UTC().Add(-48 * time.Hour)
+	n := 0
+	for _, k := range kills {
+		if !k.KillmailTime.Before(cutoff) {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // ValidateDSN opens and pings a Postgres database so bad connection strings
 // are rejected at save time instead of failing silently in the poller.
 func ValidateDSN(dsn string) error {
@@ -313,7 +361,7 @@ func checkGuild(dg *discordgo.Session, guildID string, ids []int64) {
 		}
 		log.Printf("wanderer: guild %s: connection %s <-> %s (inserted_at %s)", guildID, srcName, dstName, insertedAt.Format(time.RFC3339))
 
-		content := formatConnection(trackedName, far) + hsRouteSuffix(far)
+		content := formatConnection(trackedName, far) + hsRouteSuffix(far) + killsSuffix(far)
 		if _, err := dg.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
 			Content: content,
 			Flags:   discordgo.MessageFlagsSuppressEmbeds,

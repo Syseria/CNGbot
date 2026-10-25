@@ -66,3 +66,10 @@ func TestRouteSuffix(t *testing.T) {
 		t.Fatalf("no-route mismatch: %q", got)
 	}
 }
+
+func TestKillsSuffixGate(t *testing.T) {
+	ks := systemInfo{ID: 30000142, Name: "Amarr", SystemClass: 7, Security: "1.0", ClassTitle: "High-sec", Region: "Domain"}
+	if got := killsSuffix(ks); got != "" {
+		t.Fatalf("k-space should have no kills suffix, got %q", got)
+	}
+}
