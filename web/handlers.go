@@ -438,6 +438,10 @@ func (h *WebHandler) HandleEveLogin(w http.ResponseWriter, r *http.Request) {
 		"esi-fleets.read_fleet.v1",
 		"esi-fleets.write_fleet.v1",
 		"esi-location.read_location.v1",
+		// Projects & freelance jobs posting (same linked character as EVE mails)
+		"esi-corporations.read_projects.v1",
+		"esi-corporations.read_freelance_jobs.v1",
+		"esi-characters.read_freelance_jobs.v1",
 		"publicData",
 	}
 	if mode == "character" {
