@@ -58,6 +58,13 @@ func TestApplicationCommandsDefinitions(t *testing.T) {
 		"channel_wanderer":                true,
 		"wanderer_track":                  true,
 		"wanderer_untrack":                true,
+		"projects_channel":                true,
+		"freelance_jobs_channel":          true,
+		"buyback_set_salvage":             true,
+		"buyback_set_gas":                 true,
+		"buyback_set_ore":                 true,
+		"buyback_set_blue_loot":           true,
+		"buyback_set_datacores":           true,
 	}
 
 	if len(Commands) != len(expectedCommands) {

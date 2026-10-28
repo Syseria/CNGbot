@@ -94,6 +94,11 @@ func createOrMigrateTables(database *sql.DB) error {
 			discord_user_id TEXT NOT NULL DEFAULT '',
 			linked_at DATETIME
 		);
+		CREATE TABLE IF NOT EXISTS projects_state (
+			guild_id TEXT PRIMARY KEY,
+			projects_watermark TEXT NOT NULL DEFAULT '',
+			jobs_watermark TEXT NOT NULL DEFAULT ''
+		);
 	`)
 	if err != nil {
 		return fmt.Errorf("error creating base tables: %w", err)
@@ -708,6 +713,44 @@ func GetFleetLastInvite(eveID int) (int64, error) {
 // SetFleetInvite records the unix timestamp of the latest auto fleet invite attempt for the character.
 func SetFleetInvite(eveID int, unix int64) error {
 	_, err := DB.Exec("INSERT OR REPLACE INTO fleet_invite_state (eve_id, last_invite_unix) VALUES (?, ?)", eveID, unix)
+	return err
+}
+
+// Projects / freelance jobs watermark state
+
+func projectsStateColumn(kind string) string {
+	if kind == "project" {
+		return "projects_watermark"
+	}
+	return "jobs_watermark"
+}
+
+// GetProjectsWatermark returns the last-processed last_modified timestamp for a
+// kind ("project" or "freelance job"), or "" when the guild has no state yet.
+func GetProjectsWatermark(guildID, kind string) (string, error) {
+	if DB == nil {
+		return "", fmt.Errorf("database not initialized")
+	}
+	var wm string
+	err := DB.QueryRow(fmt.Sprintf("SELECT %s FROM projects_state WHERE guild_id = ?", projectsStateColumn(kind)), guildID).Scan(&wm)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return wm, nil
+}
+
+// SetProjectsWatermark stores the last-processed last_modified timestamp for a kind.
+func SetProjectsWatermark(guildID, kind, watermark string) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	_, err := DB.Exec(fmt.Sprintf(`
+		INSERT INTO projects_state (guild_id, %s) VALUES (?, ?)
+		ON CONFLICT(guild_id) DO UPDATE SET %s = excluded.%s
+	`, projectsStateColumn(kind), projectsStateColumn(kind), projectsStateColumn(kind)), guildID, watermark)
 	return err
 }
 

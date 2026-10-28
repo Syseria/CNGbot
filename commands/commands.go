@@ -24,6 +24,9 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+var buybackMinPercent = 0.01
+var buybackMaxPercent = 1.0
+
 var Commands = []*discordgo.ApplicationCommand{
 	{
 		Name:        "dashboard",
@@ -594,6 +597,108 @@ var Commands = []*discordgo.ApplicationCommand{
 				Name:		 "estimate",
 				Description: "The estimated value of the cargo to be hauled. Defaults to 0",
 				Required:	 true,
+			},
+		},
+	},
+	{
+		Name:        "projects_channel",
+		Description: "Sets or disables the channel where finished EVE projects are posted",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionChannel,
+				Name:        "channel",
+				Description: "The channel to post in",
+				Required:    false,
+				ChannelTypes: []discordgo.ChannelType{
+					discordgo.ChannelTypeGuildText,
+					discordgo.ChannelTypeGuildNews,
+				},
+			},
+		},
+	},
+	{
+		Name:        "freelance_jobs_channel",
+		Description: "Sets or disables the channel where finished EVE freelance jobs are posted",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionChannel,
+				Name:        "channel",
+				Description: "The channel to post in",
+				Required:    false,
+				ChannelTypes: []discordgo.ChannelType{
+					discordgo.ChannelTypeGuildText,
+					discordgo.ChannelTypeGuildNews,
+				},
+			},
+		},
+	},
+	{
+		Name:        "buyback_set_salvage",
+		Description: "Set the buyback percentage for salvage (1 = 100%, 0.5 = 50%, 0.01 = 1%)",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:     discordgo.ApplicationCommandOptionNumber,
+				Name:     "percentage",
+				Description: "Percentage as a decimal, between 0.01 and 1",
+				Required: true,
+				MinValue: &buybackMinPercent,
+				MaxValue: buybackMaxPercent,
+			},
+		},
+	},
+	{
+		Name:        "buyback_set_gas",
+		Description: "Set the buyback percentage for gas (1 = 100%, 0.5 = 50%, 0.01 = 1%)",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:     discordgo.ApplicationCommandOptionNumber,
+				Name:     "percentage",
+				Description: "Percentage as a decimal, between 0.01 and 1",
+				Required: true,
+				MinValue: &buybackMinPercent,
+				MaxValue: buybackMaxPercent,
+			},
+		},
+	},
+	{
+		Name:        "buyback_set_ore",
+		Description: "Set the buyback percentage for ore (1 = 100%, 0.5 = 50%, 0.01 = 1%)",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:     discordgo.ApplicationCommandOptionNumber,
+				Name:     "percentage",
+				Description: "Percentage as a decimal, between 0.01 and 1",
+				Required: true,
+				MinValue: &buybackMinPercent,
+				MaxValue: buybackMaxPercent,
+			},
+		},
+	},
+	{
+		Name:        "buyback_set_blue_loot",
+		Description: "Set the buyback percentage for blue loot (1 = 100%, 0.5 = 50%, 0.01 = 1%)",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:     discordgo.ApplicationCommandOptionNumber,
+				Name:     "percentage",
+				Description: "Percentage as a decimal, between 0.01 and 1",
+				Required: true,
+				MinValue: &buybackMinPercent,
+				MaxValue: buybackMaxPercent,
+			},
+		},
+	},
+	{
+		Name:        "buyback_set_datacores",
+		Description: "Set the buyback percentage for datacores (1 = 100%, 0.5 = 50%, 0.01 = 1%)",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:     discordgo.ApplicationCommandOptionNumber,
+				Name:     "percentage",
+				Description: "Percentage as a decimal, between 0.01 and 1",
+				Required: true,
+				MinValue: &buybackMinPercent,
+				MaxValue: buybackMaxPercent,
 			},
 		},
 	},
@@ -1839,6 +1944,13 @@ func InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			"`/set_events_channel [channel]` - Set the channel where newly created calendar events will be posted (omit option to disable).\n" +
 			"`/set_mail_channel [channel]` - Set the channel where EVE mails will be posted (omit option to disable).\n" +
 			"`/set_donations_channel [channel]` - Set or disable the channel for donation announcements.\n" +
+			"`/projects_channel [channel]` - Set or disable the channel where finished EVE projects are posted.\n" +
+			"`/freelance_jobs_channel [channel]` - Set or disable the channel where finished EVE freelance jobs are posted.\n" +
+			"`/buyback_set_salvage <percentage>` - Set the buyback percentage for salvage (1 = 100%, 0.5 = 50%).\n" +
+			"`/buyback_set_gas <percentage>` - Set the buyback percentage for gas (1 = 100%, 0.5 = 50%).\n" +
+			"`/buyback_set_ore <percentage>` - Set the buyback percentage for ore (1 = 100%, 0.5 = 50%).\n" +
+			"`/buyback_set_blue_loot <percentage>` - Set the buyback percentage for blue loot (1 = 100%, 0.5 = 50%).\n" +
+			"`/buyback_set_datacores <percentage>` - Set the buyback percentage for datacores (1 = 100%, 0.5 = 50%).\n" +
 			"`/set_donations_track_corporation <role>` - Toggle tracking for a specific corporation via its mapped Discord role.\n" +
 			"`/donations_leaderboard` - Displays the top 50 donors of all time to the tracked corporations.\n" +
 			"`/post_donations_leaderboard` - Posts the leaderboard to the configured donations channel.\n" +
@@ -2222,6 +2334,65 @@ func InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				return err
 			}
 			sendResponse(s, i.Interaction, fmt.Sprintf("EVE mail channel updated to <#%s>. Newly received EVE mails will be posted here.", chanID))
+			return nil
+		})
+
+	case "projects_channel", "freelance_jobs_channel":
+		key := data.Name // 'projects_channel' or 'freelance_jobs_channel' matches the config key
+		kindNoun := "project"
+		if key == "freelance_jobs_channel" {
+			kindNoun = "freelance job"
+		}
+		chanOpt := getOption(data.Options, "channel")
+		var chanID string
+		if chanOpt != nil {
+			if ch := chanOpt.ChannelValue(s); ch != nil {
+				chanID = ch.ID
+			} else if str, ok := chanOpt.Value.(string); ok {
+				chanID = str
+			}
+		}
+
+		if chanID == "" {
+			db.ExecuteOrQueue(s, i.ChannelID, func() error {
+				_, err := db.DB.Exec("DELETE FROM config WHERE guild_id = ? AND key = ?", guildID, key)
+				if err != nil {
+					return err
+				}
+				sendResponse(s, i.Interaction, fmt.Sprintf("Finished %s posting is now disabled.", kindNoun))
+				return nil
+			})
+			return
+		}
+
+		db.ExecuteOrQueue(s, i.ChannelID, func() error {
+			_, err := db.DB.Exec("INSERT OR REPLACE INTO config (guild_id, key, value) VALUES (?, ?, ?)", guildID, key, chanID)
+			if err != nil {
+				return err
+			}
+			sendResponse(s, i.Interaction, fmt.Sprintf("Channel updated to <#%s>. Newly finished %ss will be posted here.", chanID, kindNoun))
+			return nil
+		})
+
+	case "buyback_set_salvage", "buyback_set_gas", "buyback_set_ore", "buyback_set_blue_loot", "buyback_set_datacores":
+		category := strings.TrimPrefix(data.Name, "buyback_set_")
+		opt := getOption(data.Options, "percentage")
+		if opt == nil {
+			sendResponse(s, i.Interaction, "Usage: /"+data.Name+" percentage:<0.01 - 1>")
+			return
+		}
+		pct := opt.FloatValue()
+		if pct < buybackMinPercent || pct > buybackMaxPercent {
+			sendResponse(s, i.Interaction, "The percentage must be between 0.01 (1%) and 1 (100%).")
+			return
+		}
+
+		db.ExecuteOrQueue(s, i.ChannelID, func() error {
+			_, err := db.DB.Exec("INSERT OR REPLACE INTO config (guild_id, key, value) VALUES (?, ?, ?)", guildID, "buyback_"+category, strconv.FormatFloat(pct, 'f', -1, 64))
+			if err != nil {
+				return err
+			}
+			sendResponse(s, i.Interaction, fmt.Sprintf("Buyback percentage for %s set to %s.", category, fmt.Sprintf("%g%%", pct*100)))
 			return nil
 		})
 

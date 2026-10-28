@@ -28,6 +28,13 @@ Here is a full list of all available commands for the CNG Bot and what they do.
 * `/set_events_channel`: Set or disable the channel where newly created calendar events will be posted.
 * `/set_mail_channel`: Set or disable the channel where EVE mails will be posted.
 * `/set_donations_channel`: Set or disable the channel for donation announcements.
+* `/projects_channel`: Set or disable the channel where finished EVE projects are posted (uses the linked character, same as EVE mails).
+* `/freelance_jobs_channel`: Set or disable the channel where finished EVE freelance jobs are posted (uses the linked character, same as EVE mails).
+* `/buyback_set_salvage`: Set the buyback percentage for salvage items (percentage as a decimal, 1 = 100%, 0.5 = 50%, 0.01 = 1%).
+* `/buyback_set_gas`: Set the buyback percentage for gas items (percentage as a decimal, 1 = 100%, 0.5 = 50%, 0.01 = 1%).
+* `/buyback_set_ore`: Set the buyback percentage for ore items (percentage as a decimal, 1 = 100%, 0.5 = 50%, 0.01 = 1%).
+* `/buyback_set_blue_loot`: Set the buyback percentage for blue loot (percentage as a decimal, 1 = 100%, 0.5 = 50%, 0.01 = 1%).
+* `/buyback_set_datacores`: Set the buyback percentage for datacores (percentage as a decimal, 1 = 100%, 0.5 = 50%, 0.01 = 1%).
 * `/set_donations_track_corporation`: Toggle tracking for an EVE Corporation via its mapped Discord role.
 * `/donations_leaderboard`: Display the top 50 donors of all time to the tracked corporations.
 * `/post_donations_leaderboard`: Post the leaderboard to the configured donations channel.

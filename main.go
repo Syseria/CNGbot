@@ -16,6 +16,7 @@ import (
 	"evemaildiscord/donations"
 	"evemaildiscord/fleet"
 	"evemaildiscord/mail"
+	"evemaildiscord/projects"
 	"evemaildiscord/roles"
 	"evemaildiscord/web"
 	"evemaildiscord/wanderer"
@@ -94,6 +95,7 @@ func main() {
 	}()
 
 	go mail.PollEveMail(dg)
+	go projects.PollProjects(dg)
 	go donations.PollDonations(dg)
 
 	go roles.PollRoles(dg)
