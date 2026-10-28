@@ -421,20 +421,6 @@ func PollDonations(dg *discordgo.Session) {
 	}
 }
 
-var bannedPhrases = []string{
-	"[bpc]",
-}
-
-func IsDonationBanned(reason string) bool {
-	reasonLower := strings.ToLower(reason)
-	for _, phrase := range bannedPhrases {
-		if strings.Contains(reasonLower, phrase) {
-			return true
-		}
-	}
-	return false
-}
-
 func CheckDonations(dg *discordgo.Session) {
 	if dg == nil || db.DB == nil {
 		return
@@ -450,6 +436,7 @@ func CheckDonations(dg *discordgo.Session) {
 		return
 	}
 
+	const skipKeyword = string("skip")
 	for _, corpID := range corpIDs {
 		guildIDs, err := db.GetGuildsTrackingCorp(corpID)
 		if err != nil || len(guildIDs) == 0 {
@@ -491,7 +478,7 @@ func CheckDonations(dg *discordgo.Session) {
 				if entry.Amount <= 0 || entry.FirstPartyID <= 0 {
 					continue
 				}
-				if IsDonationBanned(entry.Reason) {
+				if strings.HasPrefix(strings.ToLower(entry.Reason), skipKeyword) {
 					continue
 				}
 
