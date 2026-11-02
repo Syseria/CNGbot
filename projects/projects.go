@@ -220,7 +220,9 @@ func processKind(dg *discordgo.Session, guildID, channelID string, client *http.
 	}
 
 	// Oldest first so replies read chronologically.
-	sort.Slice(newFinished, func(i, j int) bool { return parseESITime(newFinished[i].LastModified).Before(parseESITime(newFinished[j].LastModified)) })
+	sort.Slice(newFinished, func(i, j int) bool {
+		return parseESITime(newFinished[i].LastModified).Before(parseESITime(newFinished[j].LastModified))
+	})
 
 	for _, e := range newFinished {
 		if err := postFinished(dg, guildID, channelID, client, kind, corpID, e); err != nil {
@@ -519,21 +521,20 @@ func formatISK(v float64) string {
 // For deliver-type items it adds a market link, the current average buy price
 // (The Forge) and, when a buyback percentage is configured for the item's
 // category, the resulting buyback price.
-func buildMessage(guildID, kind, name, reason string, deliverables []deliverable) string {
+func buildMessage(guildID, kind, _, reason string, deliverables []deliverable) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "✅ **%s finished (%s)** — %s", kind, reason, name)
+	fmt.Fprintf(&b, "**%s finished (%s)** - ", kind, reason)
 	for _, d := range deliverables {
-		b.WriteString("\nDeliver: ")
 		if d.TypeID > 0 {
 			if d.Name == "" {
-				fmt.Fprintf(&b, "[item %d](https://evetycoon.com/market/%d)", d.TypeID, d.TypeID)
+				fmt.Fprintf(&b, "[item %d](https://evetycoon.com/market/%d)\n", d.TypeID, d.TypeID)
 			} else {
-				fmt.Fprintf(&b, "[%s](https://evetycoon.com/market/%d)", d.Name, d.TypeID)
+				fmt.Fprintf(&b, "[%s](https://evetycoon.com/market/%d)\n", d.Name, d.TypeID)
 			}
 			if avgBuy, err := fetchBuyAvg(d.TypeID); err == nil && avgBuy > 0 {
-				fmt.Fprintf(&b, " — avg buy (The Forge): %s ISK", formatISK(avgBuy))
+				fmt.Fprintf(&b, "*avg buy (The Forge): %s ISK*", formatISK(avgBuy))
 				if pct := getBuybackPercentage(guildID, CategoryForName(d.Name)); pct > 0 {
-					fmt.Fprintf(&b, " — buyback @ %s: %s ISK", formatPercent(pct), formatISK(avgBuy*pct))
+					fmt.Fprintf(&b, "Set up new buyback @ %s: %s ISK", formatPercent(pct), formatISK(avgBuy*pct))
 				}
 			}
 		} else if d.GroupID > 0 {
