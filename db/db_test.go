@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -146,6 +147,113 @@ func TestGuildIntegrationsAndMailState(t *testing.T) {
 	mailState, err = GetMailState(guildID)
 	if err != nil || mailState != 54321 {
 		t.Fatalf("expected mail state 54321, got %d (err: %v)", mailState, err)
+	}
+}
+
+func TestFleetInviteState(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_fleet_invite.db")
+
+	database, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite: %v", err)
+	}
+	defer database.Close()
+
+	if err := createOrMigrateTables(database); err != nil {
+		t.Fatalf("createOrMigrateTables failed: %v", err)
+	}
+
+	oldDB := DB
+	DB = database
+	defer func() { DB = oldDB }()
+
+	// No row recorded yet
+	eveID := 95123
+	ts, err := GetFleetLastInvite(eveID)
+	if err != nil || ts != 0 {
+		t.Fatalf("expected 0 for unknown char, got %d (err: %v)", ts, err)
+	}
+
+	if err := SetFleetInvite(eveID, 1700000000); err != nil {
+		t.Fatalf("failed to set fleet invite: %v", err)
+	}
+
+	ts, err = GetFleetLastInvite(eveID)
+	if err != nil || ts != 1700000000 {
+		t.Fatalf("expected 1700000000, got %d (err: %v)", ts, err)
+	}
+
+	// Second set replaces the value
+	if err := SetFleetInvite(eveID, 1700001234); err != nil {
+		t.Fatalf("failed to update fleet invite: %v", err)
+	}
+
+	ts, err = GetFleetLastInvite(eveID)
+	if err != nil || ts != 1700001234 {
+		t.Fatalf("expected 1700001234 after replace, got %d (err: %v)", ts, err)
+	}
+}
+
+func TestCharacterTokens(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_character_tokens.db")
+
+	database, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite: %v", err)
+	}
+	defer database.Close()
+
+	if err := createOrMigrateTables(database); err != nil {
+		t.Fatalf("createOrMigrateTables failed: %v", err)
+	}
+
+	oldDB := DB
+	DB = database
+	defer func() { DB = oldDB }()
+
+	// Empty table returns empty map, no error
+	tokens, err := GetGuildCharacterTokens("g1")
+	if err != nil {
+		t.Fatalf("unexpected error on empty table: %v", err)
+	}
+	if tokens == nil || len(tokens) != 0 {
+		t.Fatalf("expected empty map, got %v", tokens)
+	}
+
+	// Two characters in g1, one in g2
+	if err := SetCharacterToken(1001, "tok_a", "g1", "user_1"); err != nil {
+		t.Fatalf("failed to set token for char 1001: %v", err)
+	}
+	if err := SetCharacterToken(1002, "tok_b", "g1", "user_2"); err != nil {
+		t.Fatalf("failed to set token for char 1002: %v", err)
+	}
+	if err := SetCharacterToken(2001, "tok_c", "g2", "user_3"); err != nil {
+		t.Fatalf("failed to set token for char 2001: %v", err)
+	}
+
+	tokens, err = GetGuildCharacterTokens("g1")
+	if err != nil {
+		t.Fatalf("failed to get tokens for g1: %v", err)
+	}
+	if len(tokens) != 2 || tokens[1001] != "tok_a" || tokens[1002] != "tok_b" {
+		t.Fatalf("expected exactly chars 1001/1002 with their tokens, got %v", tokens)
+	}
+
+	tokens, err = GetGuildCharacterTokens("g2")
+	if err != nil || len(tokens) != 1 || tokens[2001] != "tok_c" {
+		t.Fatalf("expected char 2001 with tok_c for g2, got %v (err: %v)", tokens, err)
+	}
+
+	// Re-linking replaces the token
+	if err := SetCharacterToken(1001, "tok_a_new", "g1", "user_1"); err != nil {
+		t.Fatalf("failed to relink char 1001: %v", err)
+	}
+
+	tokens, err = GetGuildCharacterTokens("g1")
+	if err != nil || len(tokens) != 2 || tokens[1001] != "tok_a_new" {
+		t.Fatalf("expected replaced token tok_a_new, got %v (err: %v)", tokens, err)
 	}
 }
 
@@ -294,3 +402,191 @@ func TestDonationsDatabase(t *testing.T) {
 	}
 }
 
+func TestWandererTrackedAndState(t *testing.T) {
+	tmpDir := t.TempDir()
+	database, err := sql.Open("sqlite3", filepath.Join(tmpDir, "test_wanderer.db"))
+	if err != nil {
+		t.Fatalf("failed to open sqlite: %v", err)
+	}
+	defer database.Close()
+
+	if err := createOrMigrateTables(database); err != nil {
+		t.Fatalf("createOrMigrateTables failed: %v", err)
+	}
+
+	oldDB := DB
+	DB = database
+	defer func() { DB = oldDB }()
+
+	// Tracked systems CRUD
+	found, err := GetWandererTrackedByName("g1", "J111011")
+	if err != nil || found != nil {
+		t.Fatalf("expected no tracked system, got %+v (err: %v)", found, err)
+	}
+
+	if err := AddWandererTrackedSystem("g1", 31001234, "J111011"); err != nil {
+		t.Fatalf("failed to add tracked system: %v", err)
+	}
+	// duplicate insert must be a no-op (PK guild_id+solar_system_id)
+	if err := AddWandererTrackedSystem("g1", 31001234, "J111011"); err != nil {
+		t.Fatalf("duplicate insert errored: %v", err)
+	}
+	if err := AddWandererTrackedSystem("g2", 31009999, "J100809"); err != nil {
+		t.Fatalf("failed to add tracked system: %v", err)
+	}
+
+	all, err := ListWandererTrackedSystems()
+	if err != nil || len(all) != 2 {
+		t.Fatalf("expected 2 tracked systems, got %d (err: %v)", len(all), err)
+	}
+
+	// case-insensitive lookup by name
+	found, err = GetWandererTrackedByName("g1", "j111011")
+	if err != nil || found == nil || found.SolarSystemID != 31001234 {
+		t.Fatalf("expected case-insensitive lookup hit, got %+v (err: %v)", found, err)
+	}
+
+	if err := RemoveWandererTrackedSystem("g1", 31001234); err != nil {
+		t.Fatalf("failed to remove tracked system: %v", err)
+	}
+	all, err = ListWandererTrackedSystems()
+	if err != nil || len(all) != 1 {
+		t.Fatalf("expected 1 tracked system after remove, got %d (err: %v)", len(all), err)
+	}
+
+	// Poll state
+	if _, ok, err := GetWandererState("g1"); ok || err != nil {
+		t.Fatalf("expected no state, got ok=%v (err: %v)", ok, err)
+	}
+	now := time.Now().UTC()
+	if err := SetWandererState("g1", now); err != nil {
+		t.Fatalf("failed to set state: %v", err)
+	}
+	got, ok, err := GetWandererState("g1")
+	if err != nil || !ok || got.Sub(now) > time.Minute || now.Sub(got) > time.Minute {
+		t.Fatalf("state mismatch: ok=%v got=%v want~%v (err: %v)", ok, got, now, err)
+	}
+
+	// DSN config
+	if err := SetGuildWandererDSN("g1", "postgres://user:pass@host:5432/wanderer"); err != nil {
+		t.Fatalf("failed to set dsn: %v", err)
+	}
+	dsn, err := GetGuildWandererDSN("g1")
+	if err != nil || dsn != "postgres://user:pass@host:5432/wanderer" {
+		t.Fatalf("dsn mismatch: %q (err: %v)", dsn, err)
+	}
+	if err := SetGuildWandererDSN("g1", ""); err != nil {
+		t.Fatalf("failed to clear dsn: %v", err)
+	}
+	if dsn, err := GetGuildWandererDSN("g1"); err != nil || dsn != "" {
+		t.Fatalf("expected empty dsn after clear, got %q (err: %v)", dsn, err)
+	}
+}
+
+func TestWandererSeenPairs(t *testing.T) {
+	tmpDir := t.TempDir()
+	database, err := sql.Open("sqlite3", filepath.Join(tmpDir, "test_seen_pairs.db"))
+	if err != nil {
+		t.Fatalf("failed to open sqlite: %v", err)
+	}
+	defer database.Close()
+
+	if err := createOrMigrateTables(database); err != nil {
+		t.Fatalf("createOrMigrateTables failed: %v", err)
+	}
+
+	oldDB := DB
+	DB = database
+	defer func() { DB = oldDB }()
+
+	seen, err := IsWandererPairSeen("g1", 100, 200)
+	if err != nil || seen {
+		t.Fatalf("expected unseen pair, got %v (err: %v)", seen, err)
+	}
+
+	if err := MarkWandererPairSeen("g1", 100, 200); err != nil {
+		t.Fatalf("failed to mark pair: %v", err)
+	}
+	if err := MarkWandererPairSeen("g1", 100, 200); err != nil {
+		t.Fatalf("duplicate mark errored: %v", err)
+	}
+
+	// reversed order must hit the same normalized pair
+	seen, err = IsWandererPairSeen("g1", 200, 100)
+	if err != nil || !seen {
+		t.Fatalf("expected normalized pair hit, got %v (err: %v)", seen, err)
+	}
+
+	// other pairs and guilds are unaffected
+	if seen, err := IsWandererPairSeen("g1", 300, 400); err != nil || seen {
+		t.Fatalf("expected different pair unseen, got %v (err: %v)", seen, err)
+	}
+	if err := MarkWandererPairSeen("g2", 100, 200); err != nil {
+		t.Fatalf("failed to mark pair for g2: %v", err)
+	}
+	if seen, err := IsWandererPairSeen("g1", 100, 200); err != nil || !seen {
+		t.Fatalf("expected g1 pair still seen, got %v (err: %v)", seen, err)
+	}
+}
+
+func TestProjectsPostedIDs(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_posted_ids.db")
+
+	database, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open sqlite: %v", err)
+	}
+	defer database.Close()
+
+	// Pre-create projects_state with the legacy schema (no posted-ID columns)
+	// to verify the migration adds them.
+	if _, err := database.Exec(`
+		CREATE TABLE projects_state (
+			guild_id TEXT PRIMARY KEY,
+			projects_watermark TEXT NOT NULL DEFAULT '',
+			jobs_watermark TEXT NOT NULL DEFAULT ''
+		);
+	`); err != nil {
+		t.Fatalf("failed to create legacy projects_state: %v", err)
+	}
+
+	if err := createOrMigrateTables(database); err != nil {
+		t.Fatalf("createOrMigrateTables failed: %v", err)
+	}
+
+	oldDB := DB
+	DB = database
+	defer func() { DB = oldDB }()
+
+	// No row yet: empty set, no error.
+	ids, err := GetProjectsPostedIDs("g1", "project")
+	if err != nil || len(ids) != 0 {
+		t.Fatalf("expected empty posted set, got %v (err: %v)", ids, err)
+	}
+
+	// Roundtrip for one kind must not leak into the other.
+	if err := SetProjectsPostedIDs("g1", "project", map[string]bool{"a": true, "b": true}); err != nil {
+		t.Fatalf("failed to set posted ids: %v", err)
+	}
+	got, err := GetProjectsPostedIDs("g1", "project")
+	if err != nil {
+		t.Fatalf("failed to get posted ids: %v", err)
+	}
+	if !got["a"] || !got["b"] || len(got) != 2 {
+		t.Fatalf("posted ids mismatch: %v", got)
+	}
+	jobs, err := GetProjectsPostedIDs("g1", "freelance job")
+	if err != nil || len(jobs) != 0 {
+		t.Fatalf("expected empty jobs posted set, got %v (err: %v)", jobs, err)
+	}
+
+	// Empty map clears the stored set.
+	if err := SetProjectsPostedIDs("g1", "project", map[string]bool{}); err != nil {
+		t.Fatalf("failed to clear posted ids: %v", err)
+	}
+	got, err = GetProjectsPostedIDs("g1", "project")
+	if err != nil || len(got) != 0 {
+		t.Fatalf("expected cleared posted set, got %v (err: %v)", got, err)
+	}
+}

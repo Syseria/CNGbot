@@ -118,3 +118,17 @@ func TestGetValidSeatCharacters(t *testing.T) {
 		t.Errorf("expected character 9999 to be valid in SeAT")
 	}
 }
+
+func TestGetSeatConfigNotConfigured(t *testing.T) {
+	os.Unsetenv("SEAT_URL")
+	os.Unsetenv("SEAT_API")
+	os.Unsetenv("SEAT_API_KEY")
+
+	_, _, err := GetSeatConfig("")
+	if err == nil {
+		t.Fatal("expected error when SeAT is not configured")
+	}
+	if err.Error() != "SeAT is not configured (missing SEAT_URL or SEAT_API)" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}

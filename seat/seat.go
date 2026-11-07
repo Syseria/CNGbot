@@ -108,7 +108,9 @@ func FetchActiveUserCharacterIDs(baseURL, apiKey string) (map[int]bool, error) {
 	return validChars, nil
 }
 
-func GetValidSeatCharacters(guildID string) (map[int]bool, error) {
+// GetSeatConfig resolves the SeAT base URL and API key for a guild,
+// falling back to the global environment configuration.
+func GetSeatConfig(guildID string) (string, string, error) {
 	var baseURL, apiKey string
 
 	if guildID != "" {
@@ -126,9 +128,18 @@ func GetValidSeatCharacters(guildID string) (map[int]bool, error) {
 
 	if baseURL == "" || apiKey == "" {
 		if guildID != "" {
-			return nil, fmt.Errorf("SeAT is not configured for guild %s", guildID)
+			return "", "", fmt.Errorf("SeAT is not configured for guild %s", guildID)
 		}
-		return nil, fmt.Errorf("SeAT is not configured (missing SEAT_URL or SEAT_API)")
+		return "", "", fmt.Errorf("SeAT is not configured (missing SEAT_URL or SEAT_API)")
+	}
+
+	return baseURL, apiKey, nil
+}
+
+func GetValidSeatCharacters(guildID string) (map[int]bool, error) {
+	baseURL, apiKey, err := GetSeatConfig(guildID)
+	if err != nil {
+		return nil, err
 	}
 
 	chars, err := FetchActiveUserCharacterIDs(baseURL, apiKey)

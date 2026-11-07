@@ -28,12 +28,25 @@ Here is a full list of all available commands for the CNG Bot and what they do.
 * `/set_events_channel`: Set or disable the channel where newly created calendar events will be posted.
 * `/set_mail_channel`: Set or disable the channel where EVE mails will be posted.
 * `/set_donations_channel`: Set or disable the channel for donation announcements.
+* `/projects_channel`: Set or disable the channel where finished EVE projects are posted (uses the linked character, same as EVE mails).
+* `/freelance_jobs_channel`: Set or disable the channel where finished EVE freelance jobs are posted (uses the linked character, same as EVE mails).
+* `/buyback_set_salvage`: Set the buyback percentage for salvage items (percentage as a decimal, 1 = 100%, 0.5 = 50%, 0.01 = 1%).
+* `/buyback_set_gas`: Set the buyback percentage for gas items (percentage as a decimal, 1 = 100%, 0.5 = 50%, 0.01 = 1%).
+* `/buyback_set_ore`: Set the buyback percentage for ore items (percentage as a decimal, 1 = 100%, 0.5 = 50%, 0.01 = 1%).
+* `/buyback_set_blue_loot`: Set the buyback percentage for blue loot (percentage as a decimal, 1 = 100%, 0.5 = 50%, 0.01 = 1%).
+* `/buyback_set_datacores`: Set the buyback percentage for datacores (percentage as a decimal, 1 = 100%, 0.5 = 50%, 0.01 = 1%).
 * `/set_donations_track_corporation`: Toggle tracking for an EVE Corporation via its mapped Discord role.
 * `/donations_leaderboard`: Display the top 50 donors of all time to the tracked corporations.
 * `/post_donations_leaderboard`: Post the leaderboard to the configured donations channel.
 * `/import_donations`: Import pasted corporation wallet journal data to backfill donation history.
+* `/channel_wanderer`: Set the channel where notifications about new wanderer wormhole connections will be posted.
+* `/wanderer_track`: Track a J-space system (e.g. J111011) so the bot posts when a new system connects to it in your wanderer maps.
+* `/wanderer_untrack`: Stop tracking a wanderer system.
 * `/toggle_logs`: Toggle posting role addition and removal logs to the designated channel.
 * `/toggle_automap`: Toggle automatic character mapping of new server members on join.
+* `/toggle_auto_fleet_invite`: Toggle auto-inviting linked alliance members in wormhole space into the fleet of a linked fleet boss. Members must run `/link` so the bot can check their location and invite them; the boss's ESI token must include the esi-fleets scopes (via `/link` or dashboard re-link).
+* `/set_fleet_alliance`: Set the Discord role mapped to an EVE alliance (via `/map_alliance`) whose linked characters are auto-invited when a linked fleet boss is in J-space (omit role to clear).
+* `/link`: Get a link to log in your EVE character directly via EVE SSO with the scopes needed for auto fleet invite. Only characters in the alliance set via `/set_fleet_alliance` are accepted.
 * `/set_greeting`: Configure automatic greeting message for new members on join.
 * `/set_guest`: Set the guest role applied to mapped users whose Corp or Alliance is not yet mapped.
 * `/set_missing_seat_role`: Set a role to assign to users who need to log into SeAT but haven't.

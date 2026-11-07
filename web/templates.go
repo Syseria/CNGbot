@@ -24,6 +24,7 @@ type GuildCardView struct {
 type DashboardData struct {
 	User         *UserSession
 	Guilds       []GuildCardView
+	MemberGuilds []DiscordGuildInfo
 	BotInviteURL string
 }
 
@@ -47,6 +48,7 @@ type GuildConfigData struct {
 		TwoFA         string
 		AutoMap       string
 		SyncRoles     string
+		WandererDSN   string
 	}
 	Success string
 	Error   string

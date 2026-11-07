@@ -36,6 +36,10 @@ func TestApplicationCommandsDefinitions(t *testing.T) {
 		"set_mail_channel":       true,
 		"toggle_logs":            true,
 		"toggle_automap":         true,
+		"toggle_auto_fleet_invite": true,
+		"set_fleet_alliance":      true,
+		"link":                    true,
+		"courier_fee":             true,
 		"set_greeting":           true,
 		"set_guest":              true,
 		"set_missing_seat_role":  true,
@@ -51,6 +55,16 @@ func TestApplicationCommandsDefinitions(t *testing.T) {
 		"donations_leaderboard":           true,
 		"post_donations_leaderboard":      true,
 		"import_donations":                true,
+		"channel_wanderer":                true,
+		"wanderer_track":                  true,
+		"wanderer_untrack":                true,
+		"projects_channel":                true,
+		"freelance_jobs_channel":          true,
+		"buyback_set_salvage":             true,
+		"buyback_set_gas":                 true,
+		"buyback_set_ore":                 true,
+		"buyback_set_blue_loot":           true,
+		"buyback_set_datacores":           true,
 	}
 
 	if len(Commands) != len(expectedCommands) {
@@ -224,6 +238,28 @@ func TestResolveDiscordID(t *testing.T) {
 				t.Errorf("expected formatted %q, got %q", tt.expectedFmt, formatted)
 			}
 		})
+	}
+}
+
+func TestWandererCommandsOptions(t *testing.T) {
+	byName := make(map[string]*discordgo.ApplicationCommand)
+	for _, cmd := range Commands {
+		byName[cmd.Name] = cmd
+	}
+
+	cw := byName["channel_wanderer"]
+	if cw == nil || len(cw.Options) != 1 || cw.Options[0].Type != discordgo.ApplicationCommandOptionChannel || !cw.Options[0].Required {
+		t.Fatalf("channel_wanderer options wrong: %+v", cw)
+	}
+
+	for _, name := range []string{"wanderer_track", "wanderer_untrack"} {
+		cmd := byName[name]
+		if cmd == nil || len(cmd.Options) != 1 || cmd.Options[0].Type != discordgo.ApplicationCommandOptionString || !cmd.Options[0].Required {
+			t.Fatalf("%s options wrong: %+v", name, cmd)
+		}
+		if cmd.Options[0].Name != "system" {
+			t.Fatalf("%s option name = %q, want system", name, cmd.Options[0].Name)
+		}
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
@@ -15,6 +16,8 @@ import (
 	"evemaildiscord/config"
 	"evemaildiscord/db"
 	"evemaildiscord/donations"
+	"evemaildiscord/esi"
+	"evemaildiscord/wanderer"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -55,7 +58,7 @@ func (h *WebHandler) HandleDiscordLogin(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	Store.SaveOAuthState(state, "", "", "discord")
+	Store.SaveOAuthState(state, "", "", "discord", "")
 
 	redirectURI := config.GetDiscordOAuthRedirect()
 	authURL := fmt.Sprintf(
@@ -89,6 +92,37 @@ type discordUserGuild struct {
 	Icon        string `json:"icon"`
 	Owner       bool   `json:"owner"`
 	Permissions string `json:"permissions"`
+}
+
+var discordAPIBase = "https://discord.com/api/v10"
+
+// esiAffiliationURL is the public ESI endpoint used to resolve a character's
+// alliance (var so tests can point it at a stub).
+var esiAffiliationURL = "https://esi.evetech.net/latest/characters/affiliation/"
+
+// fetchUserGuilds returns the Discord guilds the session user is a member of.
+func fetchUserGuilds(accessToken string) ([]discordUserGuild, error) {
+	req, err := http.NewRequest("GET", discordAPIBase+"/users/@me/guilds", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("discord guilds endpoint returned status %d", resp.StatusCode)
+	}
+
+	var guilds []discordUserGuild
+	if err := json.NewDecoder(resp.Body).Decode(&guilds); err != nil {
+		return nil, err
+	}
+	return guilds, nil
 }
 
 func (h *WebHandler) HandleDiscordCallback(w http.ResponseWriter, r *http.Request) {
@@ -238,6 +272,30 @@ func (h *WebHandler) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	var memberGuilds []DiscordGuildInfo
+	userGuilds, err := fetchUserGuilds(session.AccessToken)
+	if err != nil {
+		log.Printf("Failed to fetch Discord guilds for user %s: %v", session.UserID, err)
+	}
+	for _, g := range userGuilds {
+		if _, isAdmin := session.AdminGuilds[g.ID]; isAdmin {
+			continue
+		}
+		if h.dg == nil || h.dg.State == nil {
+			continue
+		}
+		if _, err := h.dg.State.Guild(g.ID); err != nil {
+			continue
+		}
+		memberGuilds = append(memberGuilds, DiscordGuildInfo{
+			ID:         g.ID,
+			Name:       g.Name,
+			Icon:       g.Icon,
+			HasAdmin:   false,
+			BotInGuild: true,
+		})
+	}
+
 	botClientID := config.GetDiscordClientID()
 	botInviteURL := fmt.Sprintf(
 		"https://discord.com/api/oauth2/authorize?client_id=%s&permissions=268435456&scope=bot%%20applications.commands",
@@ -247,6 +305,7 @@ func (h *WebHandler) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 	_ = RenderDashboard(w, DashboardData{
 		User:         session,
 		Guilds:       guildsList,
+		MemberGuilds: memberGuilds,
 		BotInviteURL: botInviteURL,
 	})
 }
@@ -285,6 +344,7 @@ func (h *WebHandler) HandleGuildConfig(w http.ResponseWriter, r *http.Request) {
 		TwoFA         string
 		AutoMap       string
 		SyncRoles     string
+		WandererDSN   string
 	}
 
 	if db.DB != nil {
@@ -295,6 +355,7 @@ func (h *WebHandler) HandleGuildConfig(w http.ResponseWriter, r *http.Request) {
 		_ = db.DB.QueryRow("SELECT value FROM config WHERE guild_id = ? AND key = 'enable_2fa'", guildID).Scan(&confData.TwoFA)
 		_ = db.DB.QueryRow("SELECT value FROM config WHERE guild_id = ? AND key = 'auto_map_chars'", guildID).Scan(&confData.AutoMap)
 		_ = db.DB.QueryRow("SELECT value FROM config WHERE guild_id = ? AND key = 'sync_roles'", guildID).Scan(&confData.SyncRoles)
+		_ = db.DB.QueryRow("SELECT value FROM config WHERE guild_id = ? AND key = 'wanderer_dsn'", guildID).Scan(&confData.WandererDSN)
 	}
 
 	var trackedCorps []TrackedCorpView
@@ -325,21 +386,31 @@ func (h *WebHandler) HandleGuildConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *WebHandler) HandleEveLogin(w http.ResponseWriter, r *http.Request) {
-	session := Store.GetSession(r)
-	if session == nil {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
-	}
-
 	guildID := r.URL.Query().Get("guild_id")
 	if guildID == "" {
 		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 		return
 	}
 
-	if _, ok := session.AdminGuilds[guildID]; !ok {
-		http.Error(w, "You do not have Administrator permissions for this server", http.StatusForbidden)
-		return
+	mode := r.URL.Query().Get("mode")
+	if mode != "character" {
+		mode = ""
+	}
+
+	// character mode (the /link flow) is EVE-only: no Discord login required,
+	// the server-side OAuth state binds the request to the guild.
+	stateSessionID := ""
+	if mode != "character" {
+		session := Store.GetSession(r)
+		if session == nil {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
+		}
+		if _, ok := session.AdminGuilds[guildID]; !ok {
+			http.Error(w, "You do not have Administrator permissions for this server", http.StatusForbidden)
+			return
+		}
+		stateSessionID = session.ID
 	}
 
 	clientID := config.GetEveClientID()
@@ -354,7 +425,7 @@ func (h *WebHandler) HandleEveLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	Store.SaveOAuthState(state, session.ID, guildID, "eve")
+	Store.SaveOAuthState(state, stateSessionID, guildID, "eve", mode)
 
 	scopes := []string{
 		"esi-mail.read_mail.v1",
@@ -364,7 +435,24 @@ func (h *WebHandler) HandleEveLogin(w http.ResponseWriter, r *http.Request) {
 		"esi-corporations.read_contacts.v1",
 		"esi-corporations.read_standings.v1",
 		"esi-wallet.read_corporation_wallets.v1",
+		"esi-fleets.read_fleet.v1",
+		"esi-fleets.write_fleet.v1",
+		"esi-location.read_location.v1",
+		// Projects & freelance jobs posting (same linked character as EVE mails)
+		"esi-corporations.read_projects.v1",
+		"esi-corporations.read_freelance_jobs.v1",
+		"esi-characters.read_freelance_jobs.v1",
 		"publicData",
+	}
+	if mode == "character" {
+		// The /link flow only powers auto fleet invite: fleet + location scopes,
+		// none of the admin mail/contacts/standings/wallet scopes.
+		scopes = []string{
+			"publicData",
+			"esi-fleets.read_fleet.v1",
+			"esi-fleets.write_fleet.v1",
+			"esi-location.read_location.v1",
+		}
 	}
 
 	callbackURL := config.GetEveCallbackURL()
@@ -391,13 +479,52 @@ type eveVerifyResponse struct {
 	CharacterName string `json:"CharacterName"`
 }
 
-func (h *WebHandler) HandleEveCallback(w http.ResponseWriter, r *http.Request) {
-	session := Store.GetSession(r)
-	if session == nil {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
+// fleetAllianceForGuild returns the alliance configured for auto fleet invite
+// for the guild, or 0 when none is set.
+func fleetAllianceForGuild(guildID string) int {
+	if db.DB == nil {
+		return 0
 	}
+	var val string
+	if err := db.DB.QueryRow("SELECT value FROM config WHERE guild_id = ? AND key = 'fleet_alliance_id'", guildID).Scan(&val); err != nil {
+		return 0
+	}
+	id, _ := strconv.Atoi(val)
+	return id
+}
 
+// characterInAlliance reports whether the character's ESI affiliation lists
+// the given alliance. Characters missing from the affiliation response
+// (unknown or too new) count as not in the alliance.
+func characterInAlliance(charID, allianceID int) (bool, error) {
+	bodyBytes, err := json.Marshal([]int{charID})
+	if err != nil {
+		return false, fmt.Errorf("failed to encode character ID for affiliation: %w", err)
+	}
+	resp, err := esi.Post(esiAffiliationURL, "application/json", bytes.NewBuffer(bodyBytes))
+	if err != nil {
+		return false, fmt.Errorf("failed to request character affiliation: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != 200 {
+		return false, fmt.Errorf("ESI character affiliation returned status %d", resp.StatusCode)
+	}
+	var affiliations []struct {
+		CharacterID int `json:"character_id"`
+		AllianceID  int `json:"alliance_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&affiliations); err != nil {
+		return false, fmt.Errorf("error decoding character affiliation: %w", err)
+	}
+	for _, aff := range affiliations {
+		if aff.CharacterID == charID {
+			return aff.AllianceID == allianceID, nil
+		}
+	}
+	return false, nil
+}
+
+func (h *WebHandler) HandleEveCallback(w http.ResponseWriter, r *http.Request) {
 	state := r.URL.Query().Get("state")
 	code := r.URL.Query().Get("code")
 
@@ -407,16 +534,28 @@ func (h *WebHandler) HandleEveCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	stateData, valid := Store.ValidateAndConsumeOAuthState(state, "eve")
-	if !valid || stateData.SessionID != session.ID {
+	if !valid {
 		http.Error(w, "Invalid or expired state parameter", http.StatusBadRequest)
 		return
 	}
 
-	guildID := stateData.GuildID
-	if _, ok := session.AdminGuilds[guildID]; !ok {
-		http.Error(w, "You do not have Administrator permissions for this server", http.StatusForbidden)
-		return
+	// character mode (the /link flow) has no Discord session; the server-side
+	// state binds the guild. The guild mode is session-bound and admin-gated.
+	linkedBy := ""
+	if stateData.Mode != "character" {
+		session := Store.GetSession(r)
+		if session == nil || stateData.SessionID != session.ID {
+			http.Error(w, "Invalid or expired state parameter", http.StatusBadRequest)
+			return
+		}
+		if _, ok := session.AdminGuilds[stateData.GuildID]; !ok {
+			http.Error(w, "You do not have Administrator permissions for this server", http.StatusForbidden)
+			return
+		}
+		linkedBy = session.UserID
 	}
+
+	guildID := stateData.GuildID
 
 	clientID := config.GetEveClientID()
 	clientSecret := config.GetEveSecret()
@@ -467,6 +606,40 @@ func (h *WebHandler) HandleEveCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if stateData.Mode == "character" {
+		allianceID := fleetAllianceForGuild(guildID)
+		if allianceID <= 0 {
+			http.Error(w, "This server has no alliance configured for auto fleet invite yet (/set_fleet_alliance).", http.StatusForbidden)
+			return
+		}
+		inAlliance, err := characterInAlliance(charID, allianceID)
+		if err != nil {
+			log.Printf("Failed to verify alliance for character %d (guild %s): %v", charID, guildID, err)
+			http.Error(w, "Failed to verify the character's alliance", http.StatusInternalServerError)
+			return
+		}
+		if !inAlliance {
+			log.Printf("Rejected character %d link for guild %s: not in alliance %d", charID, guildID, allianceID)
+			http.Error(w, fmt.Sprintf("Character %s is not in the alliance configured for this server, so it cannot be linked for fleet invites.", html.EscapeString(charName)), http.StatusForbidden)
+			return
+		}
+
+		err = db.SetCharacterToken(charID, tokenResp.RefreshToken, guildID, "")
+		if err != nil {
+			log.Printf("Failed to save EVE character token for character %d (guild %s): %v", charID, guildID, err)
+			http.Error(w, "Failed to save EVE authentication", http.StatusInternalServerError)
+			return
+		}
+
+		if h.dg != nil {
+			db.DiscordLog(h.dg, guildID, fmt.Sprintf("EVE Online Character **%s** (ID: %d) linked for auto fleet invite.", charName, charID))
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, "<html><body><h2>EVE character %s linked.</h2><p>You can close this page. The bot will use this character for auto fleet invite while it is your fleet's boss.</p></body></html>", html.EscapeString(charName))
+		return
+	}
+
 	err = db.SetGuildEveAuth(guildID, charID, tokenResp.RefreshToken)
 	if err != nil {
 		log.Printf("Failed to save EVE SSO auth for guild %s: %v", guildID, err)
@@ -475,7 +648,7 @@ func (h *WebHandler) HandleEveCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.dg != nil {
-		db.DiscordLog(h.dg, guildID, fmt.Sprintf("EVE Online Character **%s** (ID: %d) successfully linked to this server by <@%s>.", charName, charID, session.UserID))
+		db.DiscordLog(h.dg, guildID, fmt.Sprintf("EVE Online Character **%s** (ID: %d) successfully linked to this server by <@%s>.", charName, charID, linkedBy))
 	}
 
 	http.Redirect(w, r, "/dashboard/guild?id="+guildID+"&success=eve_linked", http.StatusSeeOther)
@@ -522,6 +695,52 @@ func (h *WebHandler) HandleGuildSeatSave(w http.ResponseWriter, r *http.Request)
 	}
 
 	http.Redirect(w, r, "/dashboard/guild?id="+guildID+"&success=seat_saved", http.StatusSeeOther)
+}
+
+func (h *WebHandler) HandleGuildWandererSave(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	session := Store.GetSession(r)
+	if session == nil {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	_ = r.ParseForm()
+	guildID := r.FormValue("guild_id")
+	if guildID == "" {
+		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+		return
+	}
+
+	if _, ok := session.AdminGuilds[guildID]; !ok {
+		http.Error(w, "You do not have Administrator permissions for this server", http.StatusForbidden)
+		return
+	}
+
+	dsn := strings.TrimSpace(r.FormValue("wanderer_dsn"))
+	if dsn != "" {
+		if err := wanderer.ValidateDSN(dsn); err != nil {
+			log.Printf("wanderer DSN validation failed for guild %s: %v", guildID, err)
+			http.Redirect(w, r, "/dashboard/guild?id="+guildID+"&error=Could+not+connect+to+the+wanderer+database+with+that+connection+string", http.StatusSeeOther)
+			return
+		}
+	}
+
+	if err := db.SetGuildWandererDSN(guildID, dsn); err != nil {
+		log.Printf("Error saving wanderer config for guild %s: %v", guildID, err)
+		http.Redirect(w, r, "/dashboard/guild?id="+guildID+"&error=Failed+to+save+wanderer+settings", http.StatusSeeOther)
+		return
+	}
+
+	if h.dg != nil {
+		db.DiscordLog(h.dg, guildID, fmt.Sprintf("Wanderer database configuration updated by <@%s>.", session.UserID))
+	}
+
+	http.Redirect(w, r, "/dashboard/guild?id="+guildID+"&success=wanderer_saved", http.StatusSeeOther)
 }
 
 func (h *WebHandler) HandleGuildAutomationSave(w http.ResponseWriter, r *http.Request) {

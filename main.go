@@ -14,9 +14,12 @@ import (
 	"evemaildiscord/config"
 	"evemaildiscord/db"
 	"evemaildiscord/donations"
+	"evemaildiscord/fleet"
 	"evemaildiscord/mail"
+	"evemaildiscord/projects"
 	"evemaildiscord/roles"
 	"evemaildiscord/web"
+	"evemaildiscord/wanderer"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -92,10 +95,13 @@ func main() {
 	}()
 
 	go mail.PollEveMail(dg)
+	go projects.PollProjects(dg)
 	go donations.PollDonations(dg)
 
 	go roles.PollRoles(dg)
 	go roles.PollGuestRoles(dg)
+	go fleet.PollAutoInvite(dg)
+	go wanderer.PollWanderer(dg)
 
 	go web.StartServer(dg)
 

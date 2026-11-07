@@ -436,6 +436,7 @@ func CheckDonations(dg *discordgo.Session) {
 		return
 	}
 
+	const skipKeyword = string("skip")
 	for _, corpID := range corpIDs {
 		guildIDs, err := db.GetGuildsTrackingCorp(corpID)
 		if err != nil || len(guildIDs) == 0 {
@@ -475,6 +476,9 @@ func CheckDonations(dg *discordgo.Session) {
 					continue
 				}
 				if entry.Amount <= 0 || entry.FirstPartyID <= 0 {
+					continue
+				}
+				if strings.HasPrefix(strings.ToLower(entry.Reason), skipKeyword) {
 					continue
 				}
 

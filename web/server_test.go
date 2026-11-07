@@ -2,6 +2,7 @@ package web
 
 import (
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 
 	"evemaildiscord/db"
 
+	"github.com/bwmarrin/discordgo"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -60,6 +62,189 @@ func setupTestDB(t *testing.T) {
 	}
 
 	db.DB = database
+}
+
+// stubDiscordGuildsAPI overrides discordAPIBase with a test server answering
+// GET /users/@me/guilds for bearer token "test_token" (401 for any other token).
+func stubDiscordGuildsAPI(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/users/@me/guilds" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer test_token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]discordUserGuild{
+			{ID: "guild_100", Name: "Alpha Server"},
+			{ID: "guild_200", Name: "Beta Server"},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	oldBase := discordAPIBase
+	discordAPIBase = srv.URL
+	t.Cleanup(func() { discordAPIBase = oldBase })
+}
+
+// testSessionWithGuilds builds a discordgo session whose state contains the given guild IDs.
+func testSessionWithGuilds(guildIDs ...string) *discordgo.Session {
+	state := discordgo.NewState()
+	for _, id := range guildIDs {
+		_ = state.GuildAdd(&discordgo.Guild{ID: id})
+	}
+	return &discordgo.Session{State: state}
+}
+
+func TestHandleEveLogin_CharacterMode(t *testing.T) {
+	os.Setenv("EVE_CLIENT_ID", "test_eve_client_id")
+	defer os.Unsetenv("EVE_CLIENT_ID")
+
+	handler := NewWebHandler(nil)
+
+	// No Discord session needed: the /link flow goes straight to EVE SSO.
+	req := httptest.NewRequest("GET", "/auth/eve/login?guild_id=guild_100&mode=character", nil)
+	w := httptest.NewRecorder()
+
+	handler.HandleEveLogin(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect for character mode, got %d", w.Code)
+	}
+
+	u, err := url.Parse(w.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("bad location: %v", err)
+	}
+	if !strings.Contains(u.Host, "login.eveonline.com") {
+		t.Fatalf("expected EVE SSO redirect, got %s", u.String())
+	}
+	state := u.Query().Get("state")
+	data, ok := Store.oauthStates[state]
+	if !ok || data.Mode != "character" || data.GuildID != "guild_100" {
+		t.Fatalf("expected saved state with mode=character for guild_100, got %+v", data)
+	}
+
+	// Character mode must request fleet-feature scopes only.
+	scope := u.Query().Get("scope")
+	for _, want := range []string{"esi-fleets.read_fleet.v1", "esi-fleets.write_fleet.v1", "esi-location.read_location.v1", "publicData"} {
+		if !strings.Contains(scope, want) {
+			t.Errorf("expected scope %s in %q", want, scope)
+		}
+	}
+	for _, notWant := range []string{"esi-mail", "esi-wallet", "read_contacts", "read_standings"} {
+		if strings.Contains(scope, notWant) {
+			t.Errorf("unexpected admin scope %s in %q", notWant, scope)
+		}
+	}
+
+	// Guild mode still requires a session (redirects to landing when absent).
+	reqNoSession := httptest.NewRequest("GET", "/auth/eve/login?guild_id=guild_100", nil)
+	wNoSession := httptest.NewRecorder()
+
+	handler.HandleEveLogin(wNoSession, reqNoSession)
+
+	if wNoSession.Code != http.StatusSeeOther || wNoSession.Header().Get("Location") != "/" {
+		t.Fatalf("expected redirect to / for guild mode without session, got %d %s", wNoSession.Code, wNoSession.Header().Get("Location"))
+	}
+
+	// Admin flow without mode keeps the admin gate and stores no mode.
+	adminSession, err := Store.CreateSession("user123", "TestUser", "avatar1", "test_token", map[string]DiscordGuildInfo{
+		"guild_100": {ID: "guild_100", Name: "Alpha Server", HasAdmin: true},
+	})
+	if err != nil {
+		t.Fatalf("failed to create admin session: %v", err)
+	}
+
+	reqAdmin := httptest.NewRequest("GET", "/auth/eve/login?guild_id=guild_100", nil)
+	reqAdmin.AddCookie(&http.Cookie{Name: SessionCookieName, Value: adminSession.ID})
+	wAdmin := httptest.NewRecorder()
+
+	handler.HandleEveLogin(wAdmin, reqAdmin)
+
+	if wAdmin.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect for admin flow, got %d", wAdmin.Code)
+	}
+
+	uAdmin, err := url.Parse(wAdmin.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("bad location: %v", err)
+	}
+	adminData, ok := Store.oauthStates[uAdmin.Query().Get("state")]
+	if !ok || adminData.Mode != "" {
+		t.Fatalf("expected admin state without mode, got %+v", adminData)
+	}
+}
+
+func TestCharacterInAlliance(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var ids []int
+		_ = json.NewDecoder(r.Body).Decode(&ids)
+		if len(ids) == 1 && ids[0] == 42 {
+			_, _ = w.Write([]byte(`[{"character_id":42,"corporation_id":1,"alliance_id":99000001}]`))
+			return
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	old := esiAffiliationURL
+	esiAffiliationURL = srv.URL
+	defer func() { esiAffiliationURL = old }()
+
+	ok, err := characterInAlliance(42, 99000001)
+	if err != nil || !ok {
+		t.Fatalf("expected member of alliance, got ok=%v err=%v", ok, err)
+	}
+
+	ok, err = characterInAlliance(42, 99000002)
+	if err != nil || ok {
+		t.Fatalf("expected non-member, got ok=%v err=%v", ok, err)
+	}
+
+	ok, err = characterInAlliance(7, 99000001)
+	if err != nil || ok {
+		t.Fatalf("expected missing character to be non-member, got ok=%v err=%v", ok, err)
+	}
+}
+
+func TestHandleDashboard_MemberGuilds(t *testing.T) {
+	setupTestDB(t)
+	stubDiscordGuildsAPI(t)
+
+	dg := testSessionWithGuilds("guild_100", "guild_200")
+	handler := NewWebHandler(dg)
+
+	adminGuilds := map[string]DiscordGuildInfo{
+		"guild_100": {ID: "guild_100", Name: "Alpha Server", HasAdmin: true},
+	}
+
+	session, err := Store.CreateSession("user123", "TestUser", "avatar1", "test_token", adminGuilds)
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/dashboard", nil)
+	req.AddCookie(&http.Cookie{Name: SessionCookieName, Value: session.ID})
+	w := httptest.NewRecorder()
+
+	handler.HandleDashboard(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Your Servers") || !strings.Contains(body, "Link EVE Character") {
+		t.Errorf("expected member guilds section in dashboard body")
+	}
+	if !strings.Contains(body, "Beta Server") {
+		t.Errorf("expected member-only guild in dashboard body")
+	}
+	// guild_100 is an admin guild, guild_200 is member-only: exactly one character-mode link.
+	if n := strings.Count(body, "mode=character"); n != 1 {
+		t.Errorf("expected exactly 1 character-mode link, got %d", n)
+	}
 }
 
 func TestHandleIndex_Unauthenticated(t *testing.T) {
@@ -137,6 +322,7 @@ func TestHandleDiscordLogin(t *testing.T) {
 
 func TestHandleDashboard_And_GuildConfig(t *testing.T) {
 	setupTestDB(t)
+	stubDiscordGuildsAPI(t)
 
 	adminGuilds := map[string]DiscordGuildInfo{
 		"guild_100": {

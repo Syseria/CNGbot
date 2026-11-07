@@ -209,6 +209,25 @@ func TestFormatDonationAnnouncement(t *testing.T) {
 	}
 }
 
+func TestBannedDonation(t *testing.T) {
+	tests := []struct {
+		name     string
+		reason   string
+		expected bool
+	}{
+		{"Substring match", "[BPC] Drake Navy Issue", true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := IsDonationBanned(test.reason)
+			if result != test.expected {
+				t.Errorf("expected %v, got %v", test.expected, result)
+			}
+		})
+	}
+}
+
 func TestBuildLeaderboard(t *testing.T) {
 	database, cleanup := setupTestDB(t)
 	defer cleanup()

@@ -17,6 +17,7 @@ func SetupRoutes(dg *discordgo.Session) *http.ServeMux {
 	mux.HandleFunc("/dashboard", handler.HandleDashboard)
 	mux.HandleFunc("/dashboard/guild", handler.HandleGuildConfig)
 	mux.HandleFunc("/dashboard/guild/seat", handler.HandleGuildSeatSave)
+	mux.HandleFunc("/dashboard/guild/wanderer", handler.HandleGuildWandererSave)
 	mux.HandleFunc("/dashboard/guild/automation", handler.HandleGuildAutomationSave)
 	mux.HandleFunc("/dashboard/guild/eve/unlink", handler.HandleGuildEveUnlink)
 	mux.HandleFunc("/dashboard/guild/donations/import", handler.HandleGuildDonationsImport)

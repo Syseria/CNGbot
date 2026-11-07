@@ -50,6 +50,15 @@ func TestInjectDiscordTimestamps(t *testing.T) {
 		{"Weekday before time past", "monday before 10h00", "monday before 10h00 (<t:1789380000:F>)"},
 		{"Time today", "20:00 eve online time today", "20:00 eve online time today (<t:1788897600:F>)"},
 
+		// New EVE Mail Edge Cases
+		{"Weekday @ with single digit hour and no spaces", "Saturday @16:39 EVE", "Saturday @16:39 EVE (<t:1789231140:F>)"},
+		{"Weekday @ single digit hour", "Sunday @9:58 EVE", "Sunday @9:58 EVE (<t:1789293480:F>)"},
+		{"Month-first full date time", "October 23, 2026, at 20:00 EVE Time", "October 23, 2026, at 20:00 EVE Time (<t:1792785600:F>)"},
+		{"Tnite slang time", "tnite at around 21:00 Eve Time", "tnite at around 21:00 Eve Time (<t:1788814800:F>)"},
+		{"Time range overnight hyphenated", "around 12:00-01:00 Eve Time", "around 12:00-01:00 Eve Time (<t:1788868800:F> - <t:1788915600:F>)"},
+		{"Date range ordinal week", "from Monday 12th to Sunday 18th", "from Monday 12th (<t:1791763200:F>) to Sunday 18th (<t:1792281600:F>)"},
+		{"Tomorrow context for relative form up", "Tomorrow (Sunday) we form at 16:45 Eve Time", "Tomorrow (Sunday) (<t:1789257600:F>) we form at 16:45 Eve Time (<t:1789317900:F>)"},
+
 		// Sentences and Idempotence
 		{"Sentence with multiple times", "Fleet is at 20:00 eve time and second fleet is at 22:00.", "Fleet is at 20:00 eve time (<t:1788897600:F>) and second fleet is at 22:00 (<t:1788818400:F>)."},
 		{"Already formatted timestamp", "21:00 Eve Time (<t:1788814800:F>)", "21:00 Eve Time (<t:1788814800:F>)"},

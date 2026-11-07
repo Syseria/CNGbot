@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -83,6 +84,24 @@ func createOrMigrateTables(database *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_donation_record_receiver ON DonationRecord(receiver_corp_id);
 		CREATE INDEX IF NOT EXISTS idx_donation_record_donor ON DonationRecord(donor_id);
+		CREATE TABLE IF NOT EXISTS fleet_invite_state (
+			eve_id INTEGER PRIMARY KEY,
+			last_invite_unix INTEGER NOT NULL DEFAULT 0
+		);
+		CREATE TABLE IF NOT EXISTS character_tokens (
+			eve_character_id INTEGER PRIMARY KEY,
+			refresh_token TEXT NOT NULL DEFAULT '',
+			guild_id TEXT NOT NULL DEFAULT '',
+			discord_user_id TEXT NOT NULL DEFAULT '',
+			linked_at DATETIME
+		);
+		CREATE TABLE IF NOT EXISTS projects_state (
+			guild_id TEXT PRIMARY KEY,
+			projects_watermark TEXT NOT NULL DEFAULT '',
+			jobs_watermark TEXT NOT NULL DEFAULT '',
+			projects_posted TEXT NOT NULL DEFAULT '',
+			jobs_posted TEXT NOT NULL DEFAULT ''
+		);
 	`)
 	if err != nil {
 		return fmt.Errorf("error creating base tables: %w", err)
@@ -106,6 +125,27 @@ func createOrMigrateTables(database *sql.DB) error {
 		_ = colRows.Close()
 		if !hasBalance {
 			_, _ = database.Exec("ALTER TABLE DonationRecord ADD COLUMN balance REAL NOT NULL DEFAULT 0;")
+		}
+	}
+
+	// Ensure posted-ID columns exist on projects_state
+	colRows, err = database.Query("PRAGMA table_info(projects_state)")
+	if err == nil {
+		var cols []string
+		for colRows.Next() {
+			var cid int
+			var name, colType string
+			var notNull, pk int
+			var dfltValue *string
+			if colRows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk) == nil {
+				cols = append(cols, strings.ToLower(name))
+			}
+		}
+		_ = colRows.Close()
+		for _, col := range []string{"projects_posted", "jobs_posted"} {
+			if !slices.Contains(cols, col) {
+				_, _ = database.Exec(fmt.Sprintf("ALTER TABLE projects_state ADD COLUMN %s TEXT NOT NULL DEFAULT '';", col))
+			}
 		}
 	}
 
@@ -191,6 +231,21 @@ func createOrMigrateTables(database *sql.DB) error {
 			name:      "alliance_required_corp_roles",
 			schema:    "CREATE TABLE alliance_required_corp_roles (guild_id TEXT NOT NULL DEFAULT '', role_id TEXT NOT NULL, PRIMARY KEY (guild_id, role_id));",
 			colSelect: "role_id",
+		},
+		{
+			name:      "wanderer_tracked",
+			schema:    "CREATE TABLE wanderer_tracked (guild_id TEXT NOT NULL DEFAULT '', solar_system_id TEXT NOT NULL, system_name TEXT NOT NULL, PRIMARY KEY (guild_id, solar_system_id));",
+			colSelect: "solar_system_id, system_name",
+		},
+		{
+			name:      "wanderer_state",
+			schema:    "CREATE TABLE wanderer_state (guild_id TEXT NOT NULL DEFAULT '', last_seen TEXT NOT NULL, PRIMARY KEY (guild_id));",
+			colSelect: "last_seen",
+		},
+		{
+			name:      "wanderer_seen_pairs",
+			schema:    "CREATE TABLE wanderer_seen_pairs (guild_id TEXT NOT NULL DEFAULT '', src_id TEXT NOT NULL, dst_id TEXT NOT NULL, PRIMARY KEY (guild_id, src_id, dst_id));",
+			colSelect: "src_id, dst_id",
 		},
 	}
 
@@ -524,6 +579,281 @@ func SetMailState(guildID string, lastMailID int) error {
 			last_mail_id = excluded.last_mail_id
 	`, guildID, lastMailID)
 	return err
+}
+
+// Wanderer tracking
+
+type WandererTrackedSystem struct {
+	GuildID       string
+	SolarSystemID int64
+	SystemName    string
+}
+
+func AddWandererTrackedSystem(guildID string, solarSystemID int64, systemName string) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	_, err := DB.Exec("INSERT INTO wanderer_tracked (guild_id, solar_system_id, system_name) VALUES (?, ?, ?) ON CONFLICT(guild_id, solar_system_id) DO NOTHING", guildID, solarSystemID, systemName)
+	return err
+}
+
+func GetWandererTrackedByName(guildID, systemName string) (*WandererTrackedSystem, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+	var ts WandererTrackedSystem
+	err := DB.QueryRow("SELECT guild_id, solar_system_id, system_name FROM wanderer_tracked WHERE guild_id = ? AND lower(system_name) = lower(?)", guildID, systemName).Scan(&ts.GuildID, &ts.SolarSystemID, &ts.SystemName)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &ts, nil
+}
+
+func RemoveWandererTrackedSystem(guildID string, solarSystemID int64) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	_, err := DB.Exec("DELETE FROM wanderer_tracked WHERE guild_id = ? AND solar_system_id = ?", guildID, solarSystemID)
+	return err
+}
+
+func ListWandererTrackedSystems() ([]WandererTrackedSystem, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+	rows, err := DB.Query("SELECT guild_id, solar_system_id, system_name FROM wanderer_tracked")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []WandererTrackedSystem
+	for rows.Next() {
+		var ts WandererTrackedSystem
+		if err := rows.Scan(&ts.GuildID, &ts.SolarSystemID, &ts.SystemName); err != nil {
+			return nil, err
+		}
+		out = append(out, ts)
+	}
+	return out, rows.Err()
+}
+
+func GetWandererState(guildID string) (time.Time, bool, error) {
+	if DB == nil {
+		return time.Time{}, false, fmt.Errorf("database not initialized")
+	}
+	var raw string
+	err := DB.QueryRow("SELECT last_seen FROM wanderer_state WHERE guild_id = ?", guildID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	t, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return t, true, nil
+}
+
+func SetWandererState(guildID string, t time.Time) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	_, err := DB.Exec("INSERT INTO wanderer_state (guild_id, last_seen) VALUES (?, ?) ON CONFLICT(guild_id) DO UPDATE SET last_seen = excluded.last_seen", guildID, t.UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+func SetGuildWandererDSN(guildID, dsn string) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	if dsn == "" {
+		_, err := DB.Exec("DELETE FROM config WHERE guild_id = ? AND key = 'wanderer_dsn'", guildID)
+		return err
+	}
+	_, err := DB.Exec("INSERT OR REPLACE INTO config (guild_id, key, value) VALUES (?, 'wanderer_dsn', ?)", guildID, dsn)
+	return err
+}
+
+func GetGuildWandererDSN(guildID string) (string, error) {
+	if DB == nil {
+		return "", fmt.Errorf("database not initialized")
+	}
+	var dsn string
+	err := DB.QueryRow("SELECT value FROM config WHERE guild_id = ? AND key = 'wanderer_dsn'", guildID).Scan(&dsn)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return dsn, err
+}
+
+// IsWandererPairSeen reports whether a connection between two systems was
+// already announced for a guild. Endpoints are normalized so (A,B) == (B,A).
+func IsWandererPairSeen(guildID string, srcID, dstID int64) (bool, error) {
+	if DB == nil {
+		return false, fmt.Errorf("database not initialized")
+	}
+	if srcID > dstID {
+		srcID, dstID = dstID, srcID
+	}
+	var one int
+	err := DB.QueryRow("SELECT 1 FROM wanderer_seen_pairs WHERE guild_id = ? AND src_id = ? AND dst_id = ?", guildID, srcID, dstID).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// MarkWandererPairSeen records a connection pair as announced for a guild.
+func MarkWandererPairSeen(guildID string, srcID, dstID int64) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	if srcID > dstID {
+		srcID, dstID = dstID, srcID
+	}
+	_, err := DB.Exec("INSERT OR IGNORE INTO wanderer_seen_pairs (guild_id, src_id, dst_id) VALUES (?, ?, ?)", guildID, srcID, dstID)
+	return err
+}
+
+// GetFleetLastInvite returns the unix timestamp of the last auto fleet invite
+// attempt for the given EVE character, or 0 if no attempt was recorded.
+func GetFleetLastInvite(eveID int) (int64, error) {
+	var ts int64
+	err := DB.QueryRow("SELECT last_invite_unix FROM fleet_invite_state WHERE eve_id = ?", eveID).Scan(&ts)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return ts, err
+}
+
+// SetFleetInvite records the unix timestamp of the latest auto fleet invite attempt for the character.
+func SetFleetInvite(eveID int, unix int64) error {
+	_, err := DB.Exec("INSERT OR REPLACE INTO fleet_invite_state (eve_id, last_invite_unix) VALUES (?, ?)", eveID, unix)
+	return err
+}
+
+// Projects / freelance jobs watermark state
+
+func projectsStateColumn(kind string) string {
+	if kind == "project" {
+		return "projects_watermark"
+	}
+	return "jobs_watermark"
+}
+
+// GetProjectsWatermark returns the last-processed last_modified timestamp for a
+// kind ("project" or "freelance job"), or "" when the guild has no state yet.
+func GetProjectsWatermark(guildID, kind string) (string, error) {
+	if DB == nil {
+		return "", fmt.Errorf("database not initialized")
+	}
+	var wm string
+	err := DB.QueryRow(fmt.Sprintf("SELECT %s FROM projects_state WHERE guild_id = ?", projectsStateColumn(kind)), guildID).Scan(&wm)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return wm, nil
+}
+
+// SetProjectsWatermark stores the last-processed last_modified timestamp for a kind.
+func SetProjectsWatermark(guildID, kind, watermark string) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	_, err := DB.Exec(fmt.Sprintf(`
+		INSERT INTO projects_state (guild_id, %s) VALUES (?, ?)
+		ON CONFLICT(guild_id) DO UPDATE SET %s = excluded.%s
+	`, projectsStateColumn(kind), projectsStateColumn(kind), projectsStateColumn(kind)), guildID, watermark)
+	return err
+}
+
+func projectsPostedColumn(kind string) string {
+	if kind == "project" {
+		return "projects_posted"
+	}
+	return "jobs_posted"
+}
+
+// GetProjectsPostedIDs returns the IDs of already-posted finished entries for a
+// kind ("project" or "freelance job"). Finished entries are deduped by ID
+// instead of timestamp because expired/closed jobs may keep the last_modified
+// they had while active.
+func GetProjectsPostedIDs(guildID, kind string) (map[string]bool, error) {
+	out := map[string]bool{}
+	if DB == nil {
+		return out, fmt.Errorf("database not initialized")
+	}
+	var raw string
+	err := DB.QueryRow(fmt.Sprintf("SELECT %s FROM projects_state WHERE guild_id = ?", projectsPostedColumn(kind)), guildID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return out, nil
+	}
+	if err != nil {
+		return out, err
+	}
+	for _, id := range strings.Split(raw, ",") {
+		if id != "" {
+			out[id] = true
+		}
+	}
+	return out, nil
+}
+
+// SetProjectsPostedIDs stores the IDs of already-posted finished entries.
+func SetProjectsPostedIDs(guildID, kind string, ids map[string]bool) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	list := make([]string, 0, len(ids))
+	for id := range ids {
+		list = append(list, id)
+	}
+	slices.Sort(list)
+	_, err := DB.Exec(fmt.Sprintf(`
+		INSERT INTO projects_state (guild_id, %s) VALUES (?, ?)
+		ON CONFLICT(guild_id) DO UPDATE SET %s = excluded.%s
+	`, projectsPostedColumn(kind), projectsPostedColumn(kind), projectsPostedColumn(kind)), guildID, strings.Join(list, ","))
+	return err
+}
+
+// SetCharacterToken stores the ESI refresh token a guild member linked for
+// their own character via the dashboard, replacing any previous token.
+func SetCharacterToken(eveID int, refreshToken, guildID, discordUserID string) error {
+	_, err := DB.Exec("INSERT OR REPLACE INTO character_tokens (eve_character_id, refresh_token, guild_id, discord_user_id, linked_at) VALUES (?, ?, ?, ?, ?)",
+		eveID, refreshToken, guildID, discordUserID, time.Now())
+	return err
+}
+
+// GetGuildCharacterTokens returns the character-linked ESI refresh tokens for
+// a guild, keyed by EVE character ID.
+func GetGuildCharacterTokens(guildID string) (map[int]string, error) {
+	rows, err := DB.Query("SELECT eve_character_id, refresh_token FROM character_tokens WHERE guild_id = ?", guildID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	tokens := make(map[int]string)
+	for rows.Next() {
+		var eveID int
+		var token string
+		if err := rows.Scan(&eveID, &token); err != nil {
+			return nil, err
+		}
+		tokens[eveID] = token
+	}
+	return tokens, rows.Err()
 }
 
 type GuildDonationSettings struct {

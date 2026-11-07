@@ -44,6 +44,7 @@ type OAuthStateData struct {
 	SessionID string
 	GuildID   string
 	Provider  string
+	Mode      string
 	CreatedAt time.Time
 }
 
@@ -135,7 +136,7 @@ func (s *SessionStore) SetSessionCookie(w http.ResponseWriter, sessionID string,
 	})
 }
 
-func (s *SessionStore) SaveOAuthState(state, sessionID, guildID, provider string) {
+func (s *SessionStore) SaveOAuthState(state, sessionID, guildID, provider, mode string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -151,6 +152,7 @@ func (s *SessionStore) SaveOAuthState(state, sessionID, guildID, provider string
 		SessionID: sessionID,
 		GuildID:   guildID,
 		Provider:  provider,
+		Mode:      mode,
 		CreatedAt: now,
 	}
 }

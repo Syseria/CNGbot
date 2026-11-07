@@ -22,6 +22,14 @@ To enable EVE Mail forwarding, you must configure a channel for the bot to post 
 Helpful commands include:
 * `/set_mail_channel` to designate the channel where EVE mails will be posted.
 
+## Wanderer Connection Tracking
+
+The bot can watch your [wanderer](https://github.com/wanderer-industries/wanderer) maps and post a message whenever a new solar system connects to a tracked J-space system. First set your wanderer PostgreSQL connection string in the dashboard's Wanderer Integration card, then:
+Helpful commands include:
+* `/channel_wanderer` to designate the channel for notifications.
+* `/wanderer_track` to start tracking a system (e.g. J111011).
+* `/wanderer_untrack` to stop tracking a system.
+
 ## Standings Management
 You can assign roles based on in-game standings to automatically organize your server members.
 Helpful commands include:
