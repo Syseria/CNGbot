@@ -208,7 +208,7 @@ type bossCandidate struct {
 // bossCandidateFor checks one character: it must be in a fleet as fleet
 // commander and the fleet roster must place it in wormhole space.
 func bossCandidateFor(dg *discordgo.Session, guildID string, client *http.Client, charID int) (bossCandidate, bool) {
-	fleetID, role, status, err := getOwnFleet(client, charID)
+	fleetID, role, status, err := GetOwnFleet(client, charID)
 	if err != nil {
 		log.Printf("[Fleet] Guild %s: failed to resolve fleet for character %d: %v", guildID, charID, err)
 		if status == http.StatusForbidden {
@@ -393,9 +393,9 @@ func warnThrottled(dg *discordgo.Session, guildID, msg string) {
 	db.DiscordLog(dg, guildID, msg)
 }
 
-// getOwnFleet returns the fleet the character is in, or (0, "", 404, nil) when
+// GetOwnFleet returns the fleet the character is in, or (0, "", 404, nil) when
 // it is not in a fleet (ESI returns 404 in that case).
-func getOwnFleet(client *http.Client, charID int) (int64, string, int, error) {
+func GetOwnFleet(client *http.Client, charID int) (int64, string, int, error) {
 	resp, err := client.Get(fmt.Sprintf("%s/characters/%d/fleet/", esiBase, charID))
 	if err != nil {
 		return 0, "", 0, fmt.Errorf("failed to request ESI character fleet: %w", err)
