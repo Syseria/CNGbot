@@ -47,6 +47,28 @@ Here is a full list of all available commands for the CNG Bot and what they do.
 * `/toggle_auto_fleet_invite`: Toggle auto-inviting linked alliance members in wormhole space into the fleet of a linked fleet boss. Members must run `/link` so the bot can check their location and invite them; the boss's ESI token must include the esi-fleets scopes (via `/link` or dashboard re-link).
 * `/set_fleet_alliance`: Set the Discord role mapped to an EVE alliance (via `/map_alliance`) whose linked characters are auto-invited when a linked fleet boss is in J-space (omit role to clear).
 * `/link`: Get a link to log in your EVE character directly via EVE SSO with the scopes needed for auto fleet invite. Only characters in the alliance set via `/set_fleet_alliance` are accepted.
+* `/fleet_template`
+  * `save`: Allows you to save a fleet configuration as a template.
+  ```json
+  // use inline format: {"name":"Fleet","wings":[{"name":"Wing1","squads":["Squad1"]}]}
+  // extended format down below is only for a better reading/understanding
+  {
+    "name": "Fleet",
+    "wings":
+    [
+      {
+        "name": "Wing1",
+        "squads":
+        [
+          "Squad1"
+        ]
+      }
+    ]
+  }
+  ```
+  * `set-default`: Set the desired template as the server (alliance)'s default.
+* `/fleet_build`: Creates the wings/squads in-game to reflect the selected template.
+* `/fleet_panel`: Spawn a panel to have a GUI of the `/fleet_build` command.
 * `/set_greeting`: Configure automatic greeting message for new members on join.
 * `/set_guest`: Set the guest role applied to mapped users whose Corp or Alliance is not yet mapped.
 * `/set_missing_seat_role`: Set a role to assign to users who need to log into SeAT but haven't.
