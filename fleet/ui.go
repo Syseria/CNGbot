@@ -85,10 +85,15 @@ func RefreshFleetPanel(s *discordgo.Session, guildID string) {
 	})
 
 	// If the edit fails (e.g., an Admin manually deleted the message in Discord), stop tracking it.
-	if err != nil {
-		_, err := db.DB.Exec("DELETE FROM config WHERE guild_id = ? AND key IN ('fleet_panel_channel', 'fleet_panel_message')", guildID)
-		if err != nil {
-			return
+	if err == nil {
+		return
+	}
+
+	// Check if the error is a Discord 404 REST error
+	var restErr *discordgo.RESTError
+	if errors.As(err, &restErr) {
+		if restErr.Response.StatusCode == http.StatusNotFound {
+			_, _ = db.DB.Exec("DELETE FROM config WHERE guild_id = ? AND key IN ('fleet_panel_channel', 'fleet_panel_message')", guildID)
 		}
 	}
 }
@@ -109,7 +114,10 @@ func RegisterUIHandlers(s *discordgo.Session) {
 			msg := i.Message
 
 			for rIdx, row := range msg.Components {
-				actionRow := row.(*discordgo.ActionsRow)
+				actionRow, ok := row.(*discordgo.ActionsRow)
+				if !ok {
+					continue
+				}
 				for cIdx, comp := range actionRow.Components {
 					// Update the Button
 					if btn, ok := comp.(*discordgo.Button); ok && strings.HasPrefix(btn.CustomID, "btn_build_fleet_") {
