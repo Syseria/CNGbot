@@ -868,6 +868,10 @@ func InteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
+	if capital.HandleCommand(s, i, cmdName, guildID, sendResponse) {
+		return
+	}
+
 	// Give modular packages a chance to handle the command first
 	if fleet.HandleCommand(s, i, cmdName, guildID, sendResponse) {
 		return // If fleet.HandleCommand returned true, it did the work. Stop here.

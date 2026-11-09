@@ -1247,3 +1247,62 @@ func GetActiveCapitalPilots(guildID string) ([]CapitalPilot, error) {
 
 	return pilots, nil
 }
+
+// GetAllCapitalPilots returns all capital pilots (both active and inactive) for a guild.
+func GetAllCapitalPilots(guildID string) ([]CapitalPilot, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	query := `
+		SELECT 
+			cp.guild_id, 
+			cp.pilot_name, 
+			cp.eve_character_id, 
+			COALESCE(ct.discord_user_id, ctd.discord_id, cp.discord_id) AS discord_id, 
+			cp.ship_name, 
+			cp.is_active, 
+			cp.added_at, 
+			cp.deactivated_at
+		FROM capital_pilots cp
+		LEFT JOIN character_tokens ct ON cp.eve_character_id = ct.eve_character_id
+		LEFT JOIN character_to_discord ctd ON cp.eve_character_id = ctd.eve_id
+		WHERE cp.guild_id = ?
+		ORDER BY cp.is_active DESC, cp.pilot_name ASC
+	`
+
+	rows, err := DB.Query(query, guildID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var pilots []CapitalPilot
+	for rows.Next() {
+		var p CapitalPilot
+		var deact sql.NullTime
+
+		err := rows.Scan(
+			&p.GuildID,
+			&p.PilotName,
+			&p.EveCharacterID,
+			&p.DiscordID,
+			&p.ShipName,
+			&p.IsActive,
+			&p.AddedAt,
+			&deact,
+		)
+		if err == nil {
+			if deact.Valid {
+				p.DeactivatedAt = &deact.Time
+			}
+			pilots = append(pilots, p)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return pilots, nil
+}
