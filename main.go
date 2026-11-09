@@ -18,8 +18,8 @@ import (
 	"evemaildiscord/mail"
 	"evemaildiscord/projects"
 	"evemaildiscord/roles"
-	"evemaildiscord/web"
 	"evemaildiscord/wanderer"
+	"evemaildiscord/web"
 
 	"github.com/bwmarrin/discordgo"
 )
