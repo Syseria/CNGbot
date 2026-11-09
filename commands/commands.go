@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"evemaildiscord/commands/capital"
 	"evemaildiscord/fleet"
 	"fmt"
 	"io"
@@ -29,6 +30,7 @@ import (
 func init() {
 	// Append modular commands to the global list
 	Commands = append(Commands, fleet.Commands()...)
+	Commands = append(Commands, capital.Commands()...)
 }
 
 var buybackMinPercent = 0.01

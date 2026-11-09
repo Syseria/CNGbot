@@ -27,6 +27,17 @@ type QueuedCommand struct {
 	Execute   func() error
 }
 
+type CapitalPilot struct {
+	GuildID        string     `json:"guild_id"`
+	PilotName      string     `json:"pilot_name"`
+	EveCharacterID int        `json:"eve_character_id"`
+	DiscordID      string     `json:"discord_id"`
+	ShipName       string     `json:"ship_name"`
+	IsActive       bool       `json:"is_active"`
+	AddedAt        time.Time  `json:"added_at"`
+	DeactivatedAt  *time.Time `json:"deactivated_at"`
+}
+
 func InitDB() error {
 	var err error
 	DB, err = sql.Open("sqlite3", "./data.db?_journal_mode=WAL&_busy_timeout=5000")
@@ -101,6 +112,17 @@ func createOrMigrateTables(database *sql.DB) error {
 			jobs_watermark TEXT NOT NULL DEFAULT '',
 			projects_posted TEXT NOT NULL DEFAULT '',
 			jobs_posted TEXT NOT NULL DEFAULT ''
+		);
+		CREATE TABLE IF NOT EXISTS capital_pilots (
+			guild_id TEXT NOT NULL,
+			pilot_name TEXT NOT NULL,
+			eve_character_id INTEGER NOT NULL DEFAULT 0,
+			discord_id TEXT NOT NULL DEFAULT '',
+			ship_name TEXT NOT NULL,
+			is_active INTEGER NOT NULL DEFAULT 1,
+			added_at DATETIME NOT NULL,
+			deactivated_at DATETIME,
+			PRIMARY KEY (guild_id, pilot_name, ship_name)
 		);
 	`)
 	if err != nil {
@@ -1121,3 +1143,107 @@ func GetDonationsLeaderboard(guildID string, limit int) ([]DonorLeaderboardEntry
 	return entries, nil
 }
 
+// AddCapitalPilot inserts or reactivates a capital pilot.
+func AddCapitalPilot(guildID, pilotName string, eveCharacterID int, discordID, shipName string) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	now := time.Now().UTC()
+
+	_, err := DB.Exec(`
+		INSERT INTO capital_pilots (guild_id, pilot_name, eve_character_id, discord_id, ship_name, is_active, added_at)
+		VALUES (?, ?, ?, ?, ?, 1, ?)
+		ON CONFLICT(guild_id, pilot_name, ship_name) DO UPDATE SET
+			is_active = 1,
+			deactivated_at = NULL,
+			eve_character_id = CASE WHEN excluded.eve_character_id != 0 THEN excluded.eve_character_id ELSE eve_character_id END,
+			discord_id = CASE WHEN excluded.discord_id != '' THEN excluded.discord_id ELSE discord_id END
+	`, guildID, pilotName, eveCharacterID, discordID, shipName, now)
+	return err
+}
+
+// RemoveCapitalPilot softly removes a pilot by flagging them as inactive.
+// "Soft delete" in case they rage quit corp and wants to fuck with us
+// we will still have the info they have a capital available
+func RemoveCapitalPilot(guildID, pilotName string) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	now := time.Now().UTC()
+
+	res, err := DB.Exec(`
+		UPDATE capital_pilots
+		SET is_active = 0, deactivated_at = ?
+		WHERE guild_id = ? AND pilot_name = ? AND is_active = 1
+	`, now, guildID, pilotName)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, _ := res.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("no active pilot found with name '%s'", pilotName)
+	}
+
+	return nil
+}
+
+// GetActiveCapitalPilots returns all active pilots, utilizing JOINs to auto-resolve
+// the most current Discord ID from existing SSO/Auth tables.
+func GetActiveCapitalPilots(guildID string) ([]CapitalPilot, error) {
+	if DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	// COALESCE checks tables in order: character_tokens -> character_to_discord -> fallback to capital_pilots.
+	query := `
+		SELECT 
+			cp.guild_id, 
+			cp.pilot_name, 
+			cp.eve_character_id, 
+			COALESCE(ct.discord_user_id, ctd.discord_id, cp.discord_id) AS discord_id, 
+			cp.ship_name, 
+			cp.is_active, 
+			cp.added_at, 
+			cp.deactivated_at
+		FROM capital_pilots cp
+		LEFT JOIN character_tokens ct ON cp.eve_character_id = ct.eve_character_id
+		LEFT JOIN character_to_discord ctd ON cp.eve_character_id = ctd.eve_id
+		WHERE cp.guild_id = ? AND cp.is_active = 1
+	`
+
+	rows, err := DB.Query(query, guildID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var pilots []CapitalPilot
+	for rows.Next() {
+		var p CapitalPilot
+		var deact sql.NullTime
+
+		err := rows.Scan(
+			&p.GuildID,
+			&p.PilotName,
+			&p.EveCharacterID,
+			&p.DiscordID,
+			&p.ShipName,
+			&p.IsActive,
+			&p.AddedAt,
+			&deact,
+		)
+		if err == nil {
+			if deact.Valid {
+				p.DeactivatedAt = &deact.Time
+			}
+			pilots = append(pilots, p)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return pilots, nil
+}
