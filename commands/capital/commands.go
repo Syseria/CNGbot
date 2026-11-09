@@ -53,6 +53,11 @@ func Commands() []*discordgo.ApplicationCommand {
 					Description: "Delete an existing fleet template",
 					Type:        discordgo.ApplicationCommandOptionSubCommand,
 				},
+				{
+					Name:        "list_all",
+					Description: "List all capital pilots (regardless of active)",
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+				},
 			},
 		},
 	}
@@ -154,13 +159,67 @@ func HandleCommand(s *discordgo.Session, i *discordgo.InteractionCreate, cmdName
 		var pings strings.Builder
 		for _, p := range pilots {
 			if p.DiscordID != "" {
-				pings.WriteString(fmt.Sprintf("<@%s> (%s) ", p.DiscordID, p.ShipName))
+				pings.WriteString(fmt.Sprintf("<@%s> (%s)\n", p.DiscordID, p.ShipName))
 			} else {
-				pings.WriteString(fmt.Sprintf("**%s** (%s) ", p.PilotName, p.ShipName))
+				pings.WriteString(fmt.Sprintf("**%s** (%s)\n", p.PilotName, p.ShipName))
 			}
 		}
 
 		sendResponse(s, i.Interaction, fmt.Sprintf("🔔 **Pinging all Capital Pilots:**\n\n%s", pings.String()))
+		return true
+
+	case "list_all":
+		pilots, err := db.GetAllCapitalPilots(guildID)
+		if err != nil {
+			sendResponse(s, i.Interaction, fmt.Sprintf("❌ Failed to fetch capital pilots: %v", err))
+			return true
+		}
+
+		if len(pilots) == 0 {
+			sendResponse(s, i.Interaction, "There are currently no capital pilots registered.")
+			return true
+		}
+
+		var activeList, inactiveList string
+		for _, p := range pilots {
+			status := "🟢"
+			if !p.IsActive {
+				status = "🔴"
+			}
+
+			// Format the name/mention
+			mention := p.PilotName
+			if p.DiscordID != "" {
+				mention = fmt.Sprintf("<@%s>", p.DiscordID)
+			}
+
+			line := fmt.Sprintf("%s %s - **%s**\n", status, mention, p.ShipName)
+
+			if p.IsActive {
+				activeList += line
+			} else {
+				inactiveList += line
+			}
+		}
+
+		// Compile the final message
+		msg := "**Active Pilots:**\n"
+		if activeList == "" {
+			msg += "None\n"
+		} else {
+			msg += activeList
+		}
+
+		if inactiveList != "" {
+			msg += "\n**Inactive Pilots:**\n" + inactiveList
+		}
+
+		// Truncate to Discord's 2000 character limit just in case
+		if len(msg) > 2000 {
+			msg = msg[:1996] + "..."
+		}
+
+		sendResponse(s, i.Interaction, msg)
 		return true
 	}
 
