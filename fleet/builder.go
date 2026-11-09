@@ -114,6 +114,48 @@ func syncSquadCount(client *http.Client, fleetID, wingID int64, current []esiSqu
 	return current, nil
 }
 
+// MoveMembersToFirstSquad sweeps all standard fleet members into Wing 1, Squad 1.
+func MoveMembersToFirstSquad(client *http.Client, fleet ownFleet) error {
+	wings, err := fetchCurrentLayout(client, fleet.FleetID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch wings for movement: %w", err)
+	}
+
+	if len(wings) == 0 || len(wings[0].Squads) == 0 {
+		return nil
+	}
+
+	targetWingID := wings[0].ID
+	targetSquadID := wings[0].Squads[0].ID
+
+	members, err := fetchFleetMembers(client, fleet.FleetID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch fleet members: %w", err)
+	}
+
+	for _, member := range members {
+		// Preserve the Fleet Boss
+		if member.CharacterID == fleet.FleetBossID {
+			err := moveFleetMember(client, fleet.FleetID, member.CharacterID, 0, 0, "fleet_commander")
+			if err != nil {
+				fmt.Printf("Warning: Failed to move character %d: %v\n", member.CharacterID, err)
+			}
+			continue
+		}
+
+		if member.SquadID == targetSquadID {
+			continue
+		}
+
+		err := moveFleetMember(client, fleet.FleetID, member.CharacterID, targetWingID, targetSquadID, "squad_member")
+		if err != nil {
+			fmt.Printf("Warning: Failed to move character %d: %v\n", member.CharacterID, err)
+		}
+	}
+
+	return nil
+}
+
 // ==========================================
 // 3. ESI Network Wrappers
 // ==========================================
@@ -188,6 +230,57 @@ func renameFleetNode(client *http.Client, url, name string) error {
 
 	if resp.StatusCode != 204 {
 		return fmt.Errorf("rename failed with status: %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func fetchFleetMembers(client *http.Client, fleetID int64) ([]esiMember, error) {
+	resp, err := client.Get(fmt.Sprintf("%s/fleets/%d/members/", esiBase, fleetID))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("failed to fetch fleet members, status: %d", resp.StatusCode)
+	}
+
+	var members []esiMember
+	if err := json.NewDecoder(resp.Body).Decode(&members); err != nil {
+		return nil, err
+	}
+	return members, nil
+}
+
+func moveFleetMember(client *http.Client, fleetID, charID, wingID, squadID int64, role string) error {
+	url := fmt.Sprintf("%s/fleets/%d/members/%d/", esiBase, fleetID, charID)
+
+	payload := map[string]interface{}{
+		"role": role,
+	}
+
+	if wingID > 0 {
+		payload["wing_id"] = wingID
+	}
+	if squadID > 0 {
+		payload["squad_id"] = squadID
+	}
+
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequest("PUT", url, bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != 204 {
+		return fmt.Errorf("move failed with status: %d", resp.StatusCode)
 	}
 	return nil
 }

@@ -40,8 +40,9 @@ func isJSpace(systemID int) bool {
 
 // ownFleet mirrors GET /characters/{id}/fleet/
 type ownFleet struct {
-	FleetID int64  `json:"fleet_id"`
-	Role    string `json:"role"`
+	FleetBossID int64  `json:"fleet_boss_id"`
+	FleetID     int64  `json:"fleet_id"`
+	Role        string `json:"role"`
 }
 
 // fleetMember mirrors one entry of GET /fleets/{id}/members/
@@ -208,7 +209,7 @@ type bossCandidate struct {
 // bossCandidateFor checks one character: it must be in a fleet as fleet
 // commander and the fleet roster must place it in wormhole space.
 func bossCandidateFor(dg *discordgo.Session, guildID string, client *http.Client, charID int) (bossCandidate, bool) {
-	fleetID, role, status, err := GetOwnFleet(client, charID)
+	fleet, status, err := GetOwnFleet(client, charID)
 	if err != nil {
 		log.Printf("[Fleet] Guild %s: failed to resolve fleet for character %d: %v", guildID, charID, err)
 		if status == http.StatusForbidden {
@@ -216,22 +217,22 @@ func bossCandidateFor(dg *discordgo.Session, guildID string, client *http.Client
 		}
 		return bossCandidate{}, false
 	}
-	if fleetID == 0 {
+	if fleet.FleetID == 0 {
 		return bossCandidate{}, false // not in a fleet
 	}
-	members, err := getFleetMembers(client, fleetID)
+	members, err := getFleetMembers(client, fleet.FleetID)
 	if err != nil {
-		log.Printf("[Fleet] Guild %s: failed to fetch fleet %d members: %v", guildID, fleetID, err)
+		log.Printf("[Fleet] Guild %s: failed to fetch fleet %d members: %v", guildID, fleet.FleetID, err)
 		return bossCandidate{}, false
 	}
-	if role != "fleet_commander" {
+	if fleet.Role != "fleet_commander" {
 		return bossCandidate{}, false // in a fleet but cannot invite
 	}
 	boss, ok := members[charID]
 	if !ok || !isJSpace(boss.SolarSystemID) {
 		return bossCandidate{}, false // boss not in wormhole space
 	}
-	return bossCandidate{client: client, charID: charID, fleetID: fleetID, memberCount: len(members), members: members}, true
+	return bossCandidate{client: client, charID: charID, fleetID: fleet.FleetID, memberCount: len(members), members: members}, true
 }
 
 // findBossCandidates checks every character linked for this guild (personal
@@ -393,27 +394,27 @@ func warnThrottled(dg *discordgo.Session, guildID, msg string) {
 	db.DiscordLog(dg, guildID, msg)
 }
 
-// GetOwnFleet returns the fleet the character is in, or (0, "", 404, nil) when
+// GetOwnFleet returns the fleet the character is in, or (ownFleet{}, 404, nil) when
 // it is not in a fleet (ESI returns 404 in that case).
-func GetOwnFleet(client *http.Client, charID int) (int64, string, int, error) {
+func GetOwnFleet(client *http.Client, charID int) (ownFleet, int, error) {
 	resp, err := client.Get(fmt.Sprintf("%s/characters/%d/fleet/", esiBase, charID))
 	if err != nil {
-		return 0, "", 0, fmt.Errorf("failed to request ESI character fleet: %w", err)
+		return ownFleet{}, 0, fmt.Errorf("failed to request ESI character fleet: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return 0, "", resp.StatusCode, nil
+		return ownFleet{}, resp.StatusCode, nil
 	}
 	if resp.StatusCode != 200 {
-		return 0, "", resp.StatusCode, fmt.Errorf("ESI characters fleet returned status %d", resp.StatusCode)
+		return ownFleet{}, resp.StatusCode, fmt.Errorf("ESI characters fleet returned status %d", resp.StatusCode)
 	}
 
 	var fleet ownFleet
 	if err := json.NewDecoder(resp.Body).Decode(&fleet); err != nil {
-		return 0, "", resp.StatusCode, fmt.Errorf("error decoding ESI character fleet: %w", err)
+		return ownFleet{}, resp.StatusCode, fmt.Errorf("error decoding ESI character fleet: %w", err)
 	}
-	return fleet.FleetID, fleet.Role, resp.StatusCode, nil
+	return fleet, resp.StatusCode, nil
 }
 
 // getFleetMembers returns the fleet roster keyed by character ID.

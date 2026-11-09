@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	discordui "evemaildiscord/discordUI"
 	"fmt"
 	"log"
 	"os"
@@ -64,7 +65,12 @@ func main() {
 	dg.AddHandler(commands.GuildScheduledEventCreate)
 	dg.AddHandler(roles.HandleDirectMessage)
 	dg.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentsGuildMembers | discordgo.IntentsGuildScheduledEvents | discordgo.IntentsDirectMessages
-	fleet.RegisterUIHandlers(dg)
+
+	// Let packages register their UI handlers
+	fleet.InitUI()
+
+	// Hook the generic router
+	discordui.StartRouter(dg)
 
 	err = dg.Open()
 	if err != nil {

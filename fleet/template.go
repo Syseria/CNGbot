@@ -19,6 +19,13 @@ type WingTemplate struct {
 	Squads []string `json:"squads"`
 }
 
+type esiMember struct {
+	CharacterID int64  `json:"character_id"`
+	Role        string `json:"role"`
+	SquadID     int64  `json:"squad_id"`
+	WingID      int64  `json:"wing_id"`
+}
+
 // Validate ensures the template conforms to ESI's 5x5 hard limits.
 func (t *FleetTemplate) Validate() error {
 	if len(t.Wings) > 5 {
@@ -88,4 +95,25 @@ func ListFleetTemplates(guildID string) ([]string, error) {
 		}
 	}
 	return names, nil
+}
+
+// DeleteFleetTemplate removes a specific fleet template from the config table.
+func DeleteFleetTemplate(guildID string, templateName string) error {
+	configKey := "fleet_template_" + strings.ToLower(templateName)
+
+	result, err := db.DB.Exec("DELETE FROM config WHERE guild_id = ? AND key = ?", guildID, configKey)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("template '%s' not found", templateName)
+	}
+
+	return nil
 }

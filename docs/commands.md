@@ -67,6 +67,7 @@ Here is a full list of all available commands for the CNG Bot and what they do.
   }
   ```
   * `set-default`: Set the desired template as the server (alliance)'s default.
+  * `remove`: Removes the specified fleet template
 * `/fleet_build`: Creates the wings/squads in-game to reflect the selected template.
 * `/fleet_panel`: Spawn a panel to have a GUI of the `/fleet_build` command.
 * `/set_greeting`: Configure automatic greeting message for new members on join.

@@ -5,6 +5,7 @@ import (
 	"evemaildiscord/db"
 	"evemaildiscord/esi"
 	"fmt"
+	"strings"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -45,6 +46,19 @@ func Commands() []*discordgo.ApplicationCommand {
 							Type:        discordgo.ApplicationCommandOptionString,
 							Name:        "name",
 							Description: "The name of the saved template",
+							Required:    true,
+						},
+					},
+				},
+				{
+					Name:        "remove",
+					Description: "Delete an existing fleet template",
+					Type:        discordgo.ApplicationCommandOptionSubCommand,
+					Options: []*discordgo.ApplicationCommandOption{
+						{
+							Name:        "name",
+							Description: "The name of the template to delete",
+							Type:        discordgo.ApplicationCommandOptionString,
 							Required:    true,
 						},
 					},
@@ -113,6 +127,66 @@ func HandleCommand(s *discordgo.Session, i *discordgo.InteractionCreate, cmdName
 
 				sendResponse(s, i.Interaction, fmt.Sprintf("Template **%s** is now the default for this server.", name))
 				go RefreshFleetPanel(s, guildID) // Trigger the live UI update
+
+			case "remove":
+				var templateName string
+
+				for _, opt := range subCommand.Options {
+					if opt.Name == "name" {
+						templateName = opt.Value.(string) // Fallback for older discordgo versions
+					}
+				}
+
+				if templateName == "" {
+					return nil // Failsafe if the option wasn't found
+				}
+				guildID := i.GuildID
+
+				// Prevent deletion of the default template
+				var defaultName string
+				_ = db.DB.QueryRow("SELECT value FROM config WHERE guild_id = ? AND key = 'fleet_default_template'", guildID).Scan(&defaultName)
+				if strings.EqualFold(templateName, defaultName) {
+					err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "⚠️ You cannot delete the default fleet template. Please set a different template as the default first.",
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					})
+					if err != nil {
+						return err
+					}
+					return nil
+				}
+
+				err := DeleteFleetTemplate(guildID, templateName)
+				if err != nil {
+					err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+						Type: discordgo.InteractionResponseChannelMessageWithSource,
+						Data: &discordgo.InteractionResponseData{
+							Content: "❌ Failed to delete template: " + err.Error(),
+							Flags:   discordgo.MessageFlagsEphemeral,
+						},
+					})
+					if err != nil {
+						return err
+					}
+					return nil
+				}
+
+				err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{
+						Content: fmt.Sprintf("✅ Template **%s** deleted successfully.", templateName),
+						Flags:   discordgo.MessageFlagsEphemeral,
+					},
+				})
+				if err != nil {
+					return err
+				}
+
+				// Refresh the public UI panel to sync changes
+				go RefreshFleetPanel(s, guildID)
 			}
 			return nil
 		})
@@ -144,22 +218,27 @@ func HandleCommand(s *discordgo.Session, i *discordgo.InteractionCreate, cmdName
 				return nil
 			}
 
-			fleetID, role, _, err := GetOwnFleet(client, integ.EveCharacterID)
+			fleet, _, err := GetOwnFleet(client, integ.EveCharacterID)
 			if err != nil {
 				return err
 			}
-			if fleetID == 0 {
+			if fleet.FleetID == 0 {
 				sendResponse(s, i.Interaction, "You must be in a fleet to use this command.")
 				return nil
 			}
-			if role != "fleet_commander" && role != "wing_commander" {
-				sendResponse(s, i.Interaction, "You must be the Fleet Commander or a Wing Commander to structure the fleet.")
+			if fleet.FleetBossID != int64(integ.EveCharacterID) {
+				sendResponse(s, i.Interaction, "You must be the Fleet Boss to structure the fleet.")
 				return nil
 			}
 
 			sendResponse(s, i.Interaction, fmt.Sprintf("Building fleet structure using template: **%s**. Please wait...", tpl.Name))
 
-			if err := BuildFleetFromTemplate(client, fleetID, tpl); err != nil {
+			sendResponse(s, i.Interaction, "Sweeping members into the first squad...")
+			if err := MoveMembersToFirstSquad(client, fleet); err != nil {
+				_, _ = s.ChannelMessageSend(i.ChannelID, fmt.Sprintf("⚠️ Members moved with errors: %v", err))
+			}
+
+			if err := BuildFleetFromTemplate(client, fleet.FleetID, tpl); err != nil {
 				_, _ = s.ChannelMessageSend(i.ChannelID, fmt.Sprintf("⚠️ Warning: Fleet build encountered an error: %v", err))
 				return nil
 			}
