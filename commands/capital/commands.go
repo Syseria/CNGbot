@@ -97,7 +97,7 @@ func HandleCommand(s *discordgo.Session, i *discordgo.InteractionCreate, cmdName
 		}
 
 		if user == nil {
-			sendResponse(s, i.Interaction, "❌ Error: Could not resolve the selected user.")
+			sendResponse(s, i.Interaction, "Error: Could not resolve the selected user.")
 			return true
 		}
 
@@ -109,11 +109,11 @@ func HandleCommand(s *discordgo.Session, i *discordgo.InteractionCreate, cmdName
 		// The DB's JOINs will attempt to resolve the Discord ID automatically if the pilot links their auth later.
 		err := db.AddCapitalPilot(guildID, pilotName, 0, user.ID, shipType)
 		if err != nil {
-			sendResponse(s, i.Interaction, fmt.Sprintf("❌ Failed to add pilot: %v", err))
+			sendResponse(s, i.Interaction, fmt.Sprintf("Failed to add pilot: %v", err))
 			return true
 		}
 
-		sendResponse(s, i.Interaction, fmt.Sprintf("✅ Capital pilot <@%s> flying a **%s** has been added.", user.ID, shipType))
+		sendResponse(s, i.Interaction, fmt.Sprintf("Capital pilot <@%s> flying a **%s** has been added.", user.ID, shipType))
 		return true
 
 	case "remove":
@@ -126,7 +126,7 @@ func HandleCommand(s *discordgo.Session, i *discordgo.InteractionCreate, cmdName
 		}
 
 		if user == nil {
-			sendResponse(s, i.Interaction, "❌ Error: Could not resolve the selected user.")
+			sendResponse(s, i.Interaction, "Error: Could not resolve the selected user.")
 			return true
 		}
 
@@ -137,17 +137,17 @@ func HandleCommand(s *discordgo.Session, i *discordgo.InteractionCreate, cmdName
 
 		err := db.RemoveCapitalPilot(guildID, pilotName)
 		if err != nil {
-			sendResponse(s, i.Interaction, fmt.Sprintf("❌ Failed to remove pilot: %v", err))
+			sendResponse(s, i.Interaction, fmt.Sprintf("Failed to remove pilot: %v", err))
 			return true
 		}
 
-		sendResponse(s, i.Interaction, fmt.Sprintf("✅ Capital pilot <@%s> has been removed.", user.ID))
+		sendResponse(s, i.Interaction, fmt.Sprintf("Capital pilot <@%s> has been removed.", user.ID))
 		return true
 
 	case "ping":
 		pilots, err := db.GetActiveCapitalPilots(guildID)
 		if err != nil {
-			sendResponse(s, i.Interaction, fmt.Sprintf("❌ Failed to fetch capital pilots: %v", err))
+			sendResponse(s, i.Interaction, fmt.Sprintf("Failed to fetch capital pilots: %v", err))
 			return true
 		}
 
@@ -165,13 +165,13 @@ func HandleCommand(s *discordgo.Session, i *discordgo.InteractionCreate, cmdName
 			}
 		}
 
-		sendResponse(s, i.Interaction, fmt.Sprintf("🔔 **Pinging all Capital Pilots:**\n\n%s", pings.String()))
+		sendResponse(s, i.Interaction, fmt.Sprintf("**Pinging all Capital Pilots:**\n\n%s", pings.String()))
 		return true
 
 	case "list_all":
 		pilots, err := db.GetAllCapitalPilots(guildID)
 		if err != nil {
-			sendResponse(s, i.Interaction, fmt.Sprintf("❌ Failed to fetch capital pilots: %v", err))
+			sendResponse(s, i.Interaction, fmt.Sprintf("Failed to fetch capital pilots: %v", err))
 			return true
 		}
 
@@ -215,6 +215,7 @@ func HandleCommand(s *discordgo.Session, i *discordgo.InteractionCreate, cmdName
 		}
 
 		// Truncate to Discord's 2000 character limit just in case
+		/// TODO: Create a utility function for discord limit + chunks -> see mail/mail.go lines 278:304
 		if len(msg) > 2000 {
 			msg = msg[:1996] + "..."
 		}
